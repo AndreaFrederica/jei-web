@@ -5,6 +5,7 @@ import { iframeBridgePlugin } from './internal/iframeBridge';
 import { protocolTerminalPlugin } from './internal/protocolTerminal';
 import { bilibiliWikiPlugin } from './internal/bilibiliWiki';
 import { endfieldPlannerPlugin } from './internal/endfieldPlanner';
+import { endfieldBlueprintsPlugin } from './internal/endfieldBlueprints';
 
 export const builtinPlugins: JeiPluginDefinition[] = [
   externalLinkPlugin,
@@ -13,4 +14,5 @@ export const builtinPlugins: JeiPluginDefinition[] = [
   protocolTerminalPlugin,
   bilibiliWikiPlugin,
   endfieldPlannerPlugin,
+  endfieldBlueprintsPlugin,
 ];

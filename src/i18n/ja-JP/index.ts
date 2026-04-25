@@ -435,6 +435,8 @@ export default {
   setupWizardPluginProtocolTerminalDesc: 'プロトコルターミナル用の独立ツールページを追加します。',
   setupWizardPluginBilibiliWikiDesc: 'アイテム詳細から BilibiliWiki を直接開きます。',
   setupWizardPluginEndfieldPlannerDesc: '武器・装備詳細で基質計画や詞条比較を使えるようにします。',
+  setupWizardPluginEndfieldBlueprintsDesc:
+    '現在のアイテム名で終末地ブループリントライブラリを検索します。',
   setupWizardPluginRecommended: 'おすすめ',
   setupWizardIntentPreviewWiki: '資料確認向けです。アイテムクリック時は Wiki を優先します。',
   setupWizardIntentPreviewRecipes:

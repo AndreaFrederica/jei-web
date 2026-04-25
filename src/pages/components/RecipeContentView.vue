@@ -340,6 +340,7 @@
           v-bind="{
             ...(tab.iframe.sandbox ? { sandbox: tab.iframe.sandbox } : {}),
             ...(tab.iframe.noApi ? { noApi: true } : {}),
+            ...(tab.iframe.messageBridge ? { messageBridge: tab.iframe.messageBridge } : {}),
           }"
           :context="pluginContext"
         />

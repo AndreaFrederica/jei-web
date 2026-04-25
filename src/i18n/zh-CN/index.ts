@@ -430,6 +430,7 @@ export default {
   setupWizardPluginProtocolTerminalDesc: '提供协议终端相关的独立工具页。',
   setupWizardPluginBilibiliWikiDesc: '在物品详情里直接打开 BilibiliWiki。',
   setupWizardPluginEndfieldPlannerDesc: '在武器/装备详情中启用基质规划和词条对照能力。',
+  setupWizardPluginEndfieldBlueprintsDesc: '按当前物品名打开终末地蓝图库搜索。',
   setupWizardPluginRecommended: '推荐',
   setupWizardIntentPreviewWiki: '更偏向资料检索，默认会优先打开 Wiki 页。',
   setupWizardIntentPreviewRecipes: '更偏向查合成和用途，默认会优先打开配方页。',

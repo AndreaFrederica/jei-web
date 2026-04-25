@@ -784,18 +784,21 @@ const setupWizardPlugins = computed(() => {
     'protocol-terminal',
     'bilibili-wiki',
     'endfield-planner',
+    'endfield-blueprints',
   ];
   const descriptions: Record<string, string> = {
     'external-link': t('setupWizardPluginExternalLinkDesc'),
     'protocol-terminal': t('setupWizardPluginProtocolTerminalDesc'),
     'bilibili-wiki': t('setupWizardPluginBilibiliWikiDesc'),
     'endfield-planner': t('setupWizardPluginEndfieldPlannerDesc'),
+    'endfield-blueprints': t('setupWizardPluginEndfieldBlueprintsDesc'),
   };
   const recommendedFor: Record<string, SetupWizardIntent[]> = {
     'external-link': ['wiki'],
     'protocol-terminal': ['recipes', 'planner'],
     'bilibili-wiki': ['wiki', 'recipes'],
     'endfield-planner': ['planner'],
+    'endfield-blueprints': ['wiki', 'recipes'],
   };
 
   return builtinPlugins

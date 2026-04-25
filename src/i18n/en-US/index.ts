@@ -439,6 +439,8 @@ export default {
   setupWizardPluginBilibiliWikiDesc: 'Open BilibiliWiki directly from the item detail view.',
   setupWizardPluginEndfieldPlannerDesc:
     'Enable essence planner and affix comparison tools in weapon and gear details.',
+  setupWizardPluginEndfieldBlueprintsDesc:
+    'Search the Endfield blueprint library by the current item name.',
   setupWizardPluginRecommended: 'Recommended',
   setupWizardIntentPreviewWiki:
     'Best for reference browsing. Item clicks will prefer the Wiki page.',

@@ -52,10 +52,15 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch, inject } from 'vue';
 import { useQuasar } from 'quasar';
-import type { PluginItemContext, HostApiHandler } from 'src/jei/plugins/types';
+import type {
+  PluginIframeMessageBridge,
+  PluginItemContext,
+  HostApiHandler,
+} from 'src/jei/plugins/types';
 
 type MessageEnvelope = {
   channel?: string;
+  source?: string;
   type?: string;
   requestId?: string;
   payload?: unknown;
@@ -67,6 +72,7 @@ const props = defineProps<{
   allowedOrigins: string[];
   sandbox?: string;
   noApi?: boolean;
+  messageBridge?: PluginIframeMessageBridge;
   context: PluginItemContext;
 }>();
 
@@ -104,6 +110,12 @@ function postMessage(message: MessageEnvelope): void {
   );
 }
 
+function postRawMessage(message: unknown, targetOrigin = '*'): void {
+  const win = iframeRef.value?.contentWindow;
+  if (!win || !message) return;
+  win.postMessage(message, targetOrigin);
+}
+
 function pushContext(): void {
   postMessage({
     type: 'hostContext',
@@ -117,6 +129,15 @@ function pushContext(): void {
       settings: props.context.pluginSettingsById[props.pluginId] ?? {},
     },
   });
+}
+
+function pushBridgeMessage(kind: 'ready' | 'context'): void {
+  const bridge = props.messageBridge;
+  if (!bridge) return;
+  const builder = kind === 'ready' ? bridge.buildReadyMessage : bridge.buildContextMessage;
+  const message = builder?.(props.context);
+  if (!message) return;
+  postRawMessage(message, bridge.targetOrigin ?? '*');
 }
 
 async function handleHostApiCall(data: MessageEnvelope): Promise<void> {
@@ -184,11 +205,24 @@ async function handleHostApiCall(data: MessageEnvelope): Promise<void> {
 
 function onMessage(event: MessageEvent): void {
   const data = event.data as MessageEnvelope;
-  if (!data || data.channel !== 'jei-plugin') return;
+  if (!data) return;
+  const bridge = props.messageBridge;
+  if (
+    bridge &&
+    originAllowed(event.origin) &&
+    (!bridge.inboundSource || data.source === bridge.inboundSource) &&
+    bridge.readyTypes?.includes(data.type ?? '')
+  ) {
+    ready.value = true;
+    pushBridgeMessage('ready');
+    return;
+  }
+  if (data.channel !== 'jei-plugin') return;
   if (!originAllowed(event.origin)) return;
   if (data.type === 'pluginReady') {
     ready.value = true;
     pushContext();
+    pushBridgeMessage('ready');
     return;
   }
   if (data.type === 'registerServices') {
@@ -233,6 +267,7 @@ watch(
   () => {
     if (!ready.value) return;
     pushContext();
+    pushBridgeMessage('context');
   },
 );
 

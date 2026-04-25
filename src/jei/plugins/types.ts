@@ -39,6 +39,15 @@ export interface PluginTabIframeConfig {
   sandbox?: string;
   noApi?: boolean;
   keepAlive?: boolean;
+  messageBridge?: PluginIframeMessageBridge;
+}
+
+export interface PluginIframeMessageBridge {
+  inboundSource?: string;
+  readyTypes?: string[];
+  targetOrigin?: string;
+  buildReadyMessage?: (context: PluginItemContext) => Record<string, unknown> | null;
+  buildContextMessage?: (context: PluginItemContext) => Record<string, unknown> | null;
 }
 
 export interface PluginTabApiConfig {
