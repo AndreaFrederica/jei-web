@@ -5,8 +5,10 @@ import { MarkerType, type Edge, type Node } from '@vue-flow/core';
 import type { EnhancedBuildTreeResult, RequirementNode } from 'src/jei/planner/planner';
 import type { PlannerNodePosition, PlannerTargetUnit } from 'src/jei/planner/plannerUi';
 import type { PlannerResult } from 'src/jei/planner/types';
-import type { ItemKey } from 'src/jei/types';
+import type { ItemDef, ItemKey } from 'src/jei/types';
+import { lineEdgeStrokeWidth } from 'src/pages/components/advanced-planner/advancedPlannerViewUtils';
 import type {
+  GraphEdgeData,
   GraphNodeData,
   LpTreeNode,
 } from 'src/pages/components/advanced-planner/advancedPlanner.types';
@@ -22,22 +24,102 @@ type PlannerResultLike = {
   lpFlow?: PlannerResult['lpFlow'] | null;
 };
 
+const MAX_GRAPH_PORTS = 10;
+
+function graphEdgeDataFromNode(
+  node: RequirementNode,
+  amountPerMinute: number,
+): GraphEdgeData {
+  if (node.kind === 'item') return { kind: 'item', itemKey: node.itemKey, amountPerMinute };
+  return { kind: 'fluid', fluidId: node.id, amountPerMinute };
+}
+
+function applyGraphPortCounts(nodes: Node<GraphNodeData>[], edges: Edge[]): void {
+  const inEdgesByTarget = new Map<string, Edge[]>();
+  const outEdgesBySource = new Map<string, Edge[]>();
+  nodes.forEach((node) => {
+    inEdgesByTarget.set(node.id, []);
+    outEdgesBySource.set(node.id, []);
+  });
+  edges.forEach((edge) => {
+    (outEdgesBySource.get(edge.source) ?? []).push(edge);
+    (inEdgesByTarget.get(edge.target) ?? []).push(edge);
+  });
+  nodes.forEach((node) => {
+    const inList = inEdgesByTarget.get(node.id) ?? [];
+    const outList = outEdgesBySource.get(node.id) ?? [];
+    const data = node.data as GraphNodeData;
+    node.data = {
+      ...data,
+      inPorts: inList.length ? Math.min(MAX_GRAPH_PORTS, Math.max(1, inList.length)) : 0,
+      outPorts: outList.length ? Math.min(MAX_GRAPH_PORTS, Math.max(1, outList.length)) : 0,
+    } satisfies GraphNodeData;
+  });
+}
+
+function routeGraphEdges(nodes: Node<GraphNodeData>[], edges: Edge[]): Edge[] {
+  const routed = edges.map((edge) => ({ ...edge }));
+  const inEdgesByTarget = new Map<string, Edge[]>();
+  const outEdgesBySource = new Map<string, Edge[]>();
+  const posById = new Map(nodes.map((node) => [node.id, node.position] as const));
+  nodes.forEach((node) => {
+    inEdgesByTarget.set(node.id, []);
+    outEdgesBySource.set(node.id, []);
+  });
+  routed.forEach((edge) => {
+    (outEdgesBySource.get(edge.source) ?? []).push(edge);
+    (inEdgesByTarget.get(edge.target) ?? []).push(edge);
+  });
+  nodes.forEach((node) => {
+    const nodeX = posById.get(node.id)?.x ?? 0;
+    const inList = (inEdgesByTarget.get(node.id) ?? []).slice().sort((left, right) => {
+      const leftX = posById.get(left.source)?.x ?? 0;
+      const rightX = posById.get(right.source)?.x ?? 0;
+      if (leftX !== rightX) return leftX - rightX;
+      const leftY = posById.get(left.source)?.y ?? 0;
+      const rightY = posById.get(right.source)?.y ?? 0;
+      return leftY - rightY;
+    });
+    const outList = (outEdgesBySource.get(node.id) ?? []).slice().sort((left, right) => {
+      const leftX = posById.get(left.target)?.x ?? 0;
+      const rightX = posById.get(right.target)?.x ?? 0;
+      if (leftX !== rightX) return leftX - rightX;
+      const leftY = posById.get(left.target)?.y ?? 0;
+      const rightY = posById.get(right.target)?.y ?? 0;
+      if (leftY !== rightY) return leftY - rightY;
+      return Math.abs(leftX - nodeX) - Math.abs(rightX - nodeX);
+    });
+    inList.forEach((edge, index) => {
+      edge.targetHandle = `t${index % MAX_GRAPH_PORTS}`;
+    });
+    outList.forEach((edge, index) => {
+      edge.sourceHandle = `s${index % MAX_GRAPH_PORTS}`;
+    });
+  });
+  return routed;
+}
+
 export function useAdvancedPlannerGraphView(input: {
   lpMode: Ref<boolean>;
   lpResult: Ref<PlannerResultLike | null>;
   mergedTree: Ref<EnhancedBuildTreeResult | null>;
   graphShowFluids: Ref<boolean>;
   graphMergeRawMaterials: Ref<boolean>;
+  graphIntermediateColoring: ComputedRef<boolean>;
+  graphWidthByRate: ComputedRef<boolean>;
   graphDisplayUnit: Ref<PlannerTargetUnit>;
   graphNodePositions: Ref<Map<string, PlannerNodePosition>>;
   selectedGraphNodeId: Ref<string | null>;
+  itemDefsByKeyHash: ComputedRef<Record<string, ItemDef> | undefined>;
   itemName: (itemKey: ItemKey) => string;
+  itemColorOfDef: (def?: ItemDef) => string | null;
   formatAmount: (n: number) => string | number;
   rateByUnitFromPerSecond: (perSecond: number, unit: PlannerTargetUnit) => number;
   nodeDisplayRateByUnit: (node: RequirementNode, unit: PlannerTargetUnit) => number;
   formatMachineCountForDisplay: (value: unknown) => number;
   recoverySourceText: (node: RecoverySourceLike) => string;
   unitSuffix: (unit: PlannerTargetUnit) => string;
+  lineEdgeBaseWidthFromRate: (amountPerMinute: number) => number;
 }): {
   lpTreeRoots: ComputedRef<LpTreeNode[]>;
   graphFlow: ComputedRef<{ nodes: Node<GraphNodeData>[]; edges: Edge[] }>;
@@ -185,10 +267,29 @@ export function useAdvancedPlannerGraphView(input: {
       source: edge.source,
       target: edge.target,
       type: 'smoothstep',
-      markerEnd: MarkerType.ArrowClosed,
+      data:
+        edge.kind === 'item'
+          ? ({
+              kind: 'item',
+              itemKey: edge.itemKey,
+              amountPerMinute: edge.amountPerSecond * 60,
+            } satisfies GraphEdgeData)
+          : ({
+              kind: 'fluid',
+              fluidId: edge.fluidId,
+              amountPerMinute: edge.amountPerSecond * 60,
+            } satisfies GraphEdgeData),
+      markerEnd: {
+        type: MarkerType.ArrowClosed,
+        width: 10,
+        height: 10,
+        markerUnits: 'userSpaceOnUse',
+        strokeWidth: 1.5,
+      },
       ...(edge.kind === 'fluid' ? { style: { stroke: '#78909c', strokeDasharray: '6 4' } } : {}),
     }));
 
+    applyGraphPortCounts(nodes, edges);
     return { nodes, edges };
   };
 
@@ -437,12 +538,23 @@ export function useAdvancedPlannerGraphView(input: {
 
           const edgeId = `${nodeId}->${childId}`;
           if (!edges.find((edge) => edge.id === edgeId)) {
+            const amountPerMinute = input.nodeDisplayRateByUnit(child, 'per_minute');
             edges.push({
               id: edgeId,
               source: nodeId,
               target: childId,
               type: 'smoothstep',
-              markerEnd: MarkerType.ArrowClosed,
+              data: graphEdgeDataFromNode(child, amountPerMinute),
+              ...(child.kind === 'fluid'
+                ? { style: { stroke: '#78909c', strokeDasharray: '6 4' } }
+                : {}),
+              markerEnd: {
+                type: MarkerType.ArrowClosed,
+                width: 10,
+                height: 10,
+                markerUnits: 'userSpaceOnUse',
+                strokeWidth: 1.5,
+              },
             });
           }
           if (
@@ -469,11 +581,22 @@ export function useAdvancedPlannerGraphView(input: {
                   target: childId,
                   type: 'smoothstep',
                   animated: true,
+                  data: {
+                    kind: 'item',
+                    itemKey: child.itemKey,
+                    amountPerMinute: input.nodeDisplayRateByUnit(child, 'per_minute'),
+                  } satisfies GraphEdgeData,
                   style: { stroke: '#26a69a', strokeDasharray: '6 4' },
                   label: 'recovery',
                   labelBgPadding: [4, 2],
                   labelBgBorderRadius: 4,
-                  markerEnd: MarkerType.ArrowClosed,
+                  markerEnd: {
+                    type: MarkerType.ArrowClosed,
+                    width: 10,
+                    height: 10,
+                    markerUnits: 'userSpaceOnUse',
+                    strokeWidth: 1.5,
+                  },
                 });
               }
             }
@@ -501,6 +624,7 @@ export function useAdvancedPlannerGraphView(input: {
     };
 
     walk(input.mergedTree.value.root, 0, pad, '0');
+    applyGraphPortCounts(nodes, edges);
     return { nodes, edges };
   });
 
@@ -516,19 +640,64 @@ export function useAdvancedPlannerGraphView(input: {
     }),
   );
 
-  const graphFlowEdgesStyled = computed(() => {
+  const graphFlowEdgesRouted = computed(() =>
+    routeGraphEdges(graphFlowNodesStyled.value, graphFlow.value.edges),
+  );
+
+  const graphEdgeBaseStroke = (edge: Edge): string | null => {
+    const data = (edge.data ?? {}) as Partial<GraphEdgeData>;
+    if (data.kind === 'fluid') return '#0ea5e9';
+    if (data.kind === 'item' && data.itemKey) {
+      const color = input.itemColorOfDef(
+        input.itemDefsByKeyHash.value?.[itemKeyHash(data.itemKey)],
+      );
+      if (color) return color;
+    }
+    return null;
+  };
+
+  const graphEdgeBaseWidth = (edge: Edge): number | null => {
+    if (!input.graphWidthByRate.value) return null;
+    const data = (edge.data ?? {}) as Partial<GraphEdgeData>;
+    const amountPerMinute = Number(data.amountPerMinute);
+    if (!Number.isFinite(amountPerMinute) || amountPerMinute <= 0) return null;
+    return input.lineEdgeBaseWidthFromRate(amountPerMinute);
+  };
+
+  const graphEdgeBaseStyle = (edge: Edge): NonNullable<Edge['style']> => {
+    const stroke = input.graphIntermediateColoring.value ? graphEdgeBaseStroke(edge) : null;
+    const strokeWidth = graphEdgeBaseWidth(edge);
+    const currentStyle =
+      edge.style && typeof edge.style === 'object' ? (edge.style as Record<string, unknown>) : {};
+    return {
+      ...currentStyle,
+      ...(stroke ? { stroke } : {}),
+      ...(strokeWidth !== null ? { strokeWidth } : {}),
+    } as NonNullable<Edge['style']>;
+  };
+
+  const graphEdgeStrokeWidth = (
+    edge: Edge,
+    baseStyle: NonNullable<Edge['style']>,
+    emphasis: 'connected' | 'path',
+  ): number => {
+    if (!input.graphWidthByRate.value) return emphasis === 'connected' ? 3 : 2.5;
+    return lineEdgeStrokeWidth({ ...edge, style: baseStyle }, emphasis);
+  };
+
+  const graphFlowEdgesStyled = computed<Edge[]>(() => {
     const selectedId = input.selectedGraphNodeId.value;
     if (!selectedId) {
-      return graphFlow.value.edges.map((edge) => ({
+      return graphFlowEdgesRouted.value.map((edge) => ({
         ...edge,
-        ...(edge.style !== undefined ? { style: edge.style } : {}),
+        style: graphEdgeBaseStyle(edge),
         ...(edge.zIndex !== undefined ? { zIndex: edge.zIndex } : {}),
       }));
     }
 
     const outEdgesBySource = new Map<string, Edge[]>();
     const inEdgesByTarget = new Map<string, Edge[]>();
-    graphFlow.value.edges.forEach((edge) => {
+    graphFlowEdgesRouted.value.forEach((edge) => {
       if (!outEdgesBySource.has(edge.source)) outEdgesBySource.set(edge.source, []);
       if (!inEdgesByTarget.has(edge.target)) inEdgesByTarget.set(edge.target, []);
       outEdgesBySource.get(edge.source)!.push(edge);
@@ -573,14 +742,25 @@ export function useAdvancedPlannerGraphView(input: {
     walkDownstream(selectedId);
     walkUpstream(selectedId);
 
-    return graphFlow.value.edges.map((edge) => {
+    return graphFlowEdgesRouted.value.map((edge) => {
       const connected = edge.source === selectedId || edge.target === selectedId;
       const inPath = downstreamEdgeIds.has(edge.id) || upstreamEdgeIds.has(edge.id);
+      const baseStyle = graphEdgeBaseStyle(edge);
       const style = connected
-        ? { ...(edge.style ?? {}), stroke: 'var(--q-primary)', strokeWidth: 3, opacity: 1 }
+        ? {
+            ...baseStyle,
+            stroke: 'var(--q-primary)',
+            strokeWidth: graphEdgeStrokeWidth(edge, baseStyle, 'connected'),
+            opacity: 1,
+          }
         : inPath
-          ? { ...(edge.style ?? {}), stroke: 'var(--q-secondary)', strokeWidth: 2.5, opacity: 0.9 }
-          : { ...(edge.style ?? {}), opacity: 0.2 };
+          ? {
+              ...baseStyle,
+              stroke: 'var(--q-secondary)',
+              strokeWidth: graphEdgeStrokeWidth(edge, baseStyle, 'path'),
+              opacity: 0.9,
+            }
+          : { ...baseStyle, opacity: 0.2 };
       const result: Edge = {
         ...edge,
         style,

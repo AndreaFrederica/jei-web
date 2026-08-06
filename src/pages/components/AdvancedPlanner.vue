@@ -168,6 +168,8 @@
             :graph-display-unit="graphDisplayUnit"
             :graph-show-fluids="graphShowFluids"
             :graph-merge-raw-materials="graphMergeRawMaterials"
+            :graph-intermediate-coloring="settingsStore.lineIntermediateColoring"
+            :graph-width-by-rate="lineWidthByRate"
             :graph-flow-nodes="graphFlowNodes"
             :graph-flow-nodes-styled="graphFlowNodesStyled"
             :graph-flow-edges-styled="graphFlowEdgesStyled"
@@ -180,7 +182,10 @@
             @update:graph-display-unit="graphDisplayUnit = $event"
             @update:graph-show-fluids="graphShowFluids = $event"
             @update:graph-merge-raw-materials="graphMergeRawMaterials = $event"
+            @update:graph-intermediate-coloring="settingsStore.setLineIntermediateColoring($event)"
+            @update:graph-width-by-rate="lineWidthByRate = $event"
             @update:selected-graph-node-id="selectedGraphNodeId = $event"
+            @open-line-width-curve="lineWidthCurveDialogOpen = true"
             @node-drag-stop="onGraphNodeDragStop"
           />
         </q-tab-panel>
@@ -1617,16 +1622,21 @@ const { lpTreeRoots, graphFlowNodes, graphFlowNodesStyled, graphFlowEdgesStyled 
     mergedTree,
     graphShowFluids,
     graphMergeRawMaterials,
+    graphIntermediateColoring: lineIntermediateColoring,
+    graphWidthByRate: lineWidthByRate,
     graphDisplayUnit,
     graphNodePositions,
     selectedGraphNodeId,
+    itemDefsByKeyHash: itemDefsByKeyHashComputed,
     itemName,
+    itemColorOfDef,
     formatAmount,
     rateByUnitFromPerSecond,
     nodeDisplayRateByUnit,
     formatMachineCountForDisplay,
     recoverySourceText,
     unitSuffix,
+    lineEdgeBaseWidthFromRate,
   });
 
 const { toggleCollapsed, treeRows, treeListRows, recoveryProducedByNodeId, recoveryProducedText } =

@@ -329,6 +329,15 @@
   border: 1px solid rgba(255, 255, 255, 0.9) !important;
 }
 
+.advanced-planner .planner__graph-handle {
+  width: 1px !important;
+  height: 1px !important;
+  opacity: 0 !important;
+  background: transparent !important;
+  border: none !important;
+  pointer-events: none !important;
+}
+
 .advanced-planner .planner__flow-node-icon {
   display: flex;
   align-items: center;

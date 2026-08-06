@@ -30,6 +30,15 @@ export type GraphNodeData = {
   cycleSeed?: boolean;
   recovery?: boolean;
   recoverySource?: string;
+  inPorts?: number;
+  outPorts?: number;
+};
+
+export type GraphEdgeData = {
+  kind: 'item' | 'fluid';
+  itemKey?: ItemKey;
+  fluidId?: string;
+  amountPerMinute?: number;
 };
 
 export type LineFlowItemData = {

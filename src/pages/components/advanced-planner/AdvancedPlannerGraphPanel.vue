@@ -30,6 +30,27 @@
         :label="t('mergeRawMaterials')"
         @update:model-value="emit('update:graph-merge-raw-materials', !!$event)"
       />
+      <q-toggle
+        :model-value="graphIntermediateColoring"
+        dense
+        :label="t('intermediateColoring')"
+        @update:model-value="emit('update:graph-intermediate-coloring', !!$event)"
+      />
+      <q-toggle
+        :model-value="graphWidthByRate"
+        dense
+        :label="t('lineWidthByRate')"
+        @update:model-value="emit('update:graph-width-by-rate', !!$event)"
+      />
+      <q-btn
+        v-if="graphWidthByRate"
+        dense
+        flat
+        no-caps
+        icon="tune"
+        :label="t('lineWidthEditCurve')"
+        @click="emit('open-line-width-curve')"
+      />
     </advanced-planner-viewport-toolbar>
 
     <div
@@ -65,7 +86,27 @@
               'planner__flow-node--selected': selectedGraphNodeId === panel.id,
               'planner__flow-node--recovery': panel.data.recovery,
             }"
+            @click.stop="emit('update:selected-graph-node-id', panel.id)"
+            @dblclick.stop
           >
+            <Handle
+              v-for="i in panel.data.inPorts ?? 0"
+              :id="`t${i - 1}`"
+              :key="`t${i - 1}`"
+              type="target"
+              :position="Position.Top"
+              class="planner__graph-handle"
+              :style="{ left: `${(i / ((panel.data.inPorts ?? 0) + 1)) * 100}%` }"
+            />
+            <Handle
+              v-for="i in panel.data.outPorts ?? 0"
+              :id="`s${i - 1}`"
+              :key="`s${i - 1}`"
+              type="source"
+              :position="Position.Bottom"
+              class="planner__graph-handle"
+              :style="{ left: `${(i / ((panel.data.outPorts ?? 0) + 1)) * 100}%` }"
+            />
             <div class="planner__flow-node-icon">
               <stack-view
                 :content="{
@@ -126,7 +167,27 @@
           <div
             class="planner__flow-node planner__flow-node--fluid nopan"
             :class="{ 'planner__flow-node--selected': selectedGraphNodeId === panel.id }"
+            @click.stop="emit('update:selected-graph-node-id', panel.id)"
+            @dblclick.stop
           >
+            <Handle
+              v-for="i in panel.data.inPorts ?? 0"
+              :id="`t${i - 1}`"
+              :key="`t${i - 1}`"
+              type="target"
+              :position="Position.Top"
+              class="planner__graph-handle"
+              :style="{ left: `${(i / ((panel.data.inPorts ?? 0) + 1)) * 100}%` }"
+            />
+            <Handle
+              v-for="i in panel.data.outPorts ?? 0"
+              :id="`s${i - 1}`"
+              :key="`s${i - 1}`"
+              type="source"
+              :position="Position.Bottom"
+              class="planner__graph-handle"
+              :style="{ left: `${(i / ((panel.data.outPorts ?? 0) + 1)) * 100}%` }"
+            />
             <div class="planner__flow-node-text">
               <div class="planner__flow-node-title">{{ panel.data.title }}</div>
               <div class="planner__flow-node-sub">{{ panel.data.subtitle }}</div>
@@ -143,7 +204,7 @@
 import { Background } from '@vue-flow/background';
 import { Controls } from '@vue-flow/controls';
 import { MiniMap } from '@vue-flow/minimap';
-import { VueFlow, type Edge, type Node } from '@vue-flow/core';
+import { Handle, Position, VueFlow, type Edge, type Node } from '@vue-flow/core';
 import { ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import StackView from 'src/jei/components/StackView.vue';
@@ -160,6 +221,8 @@ defineProps<{
   graphDisplayUnit: PlannerTargetUnit;
   graphShowFluids: boolean;
   graphMergeRawMaterials: boolean;
+  graphIntermediateColoring: boolean;
+  graphWidthByRate: boolean;
   graphFlowNodes: Node[];
   graphFlowNodesStyled: Node<GraphNodeData>[];
   graphFlowEdgesStyled: Edge[];
@@ -172,11 +235,14 @@ const emit = defineEmits<{
   'update:graph-display-unit': [value: PlannerTargetUnit];
   'update:graph-show-fluids': [value: boolean];
   'update:graph-merge-raw-materials': [value: boolean];
+  'update:graph-intermediate-coloring': [value: boolean];
+  'update:graph-width-by-rate': [value: boolean];
   'update:selected-graph-node-id': [value: string | null];
   'node-drag-stop': [event: { node: Node }];
   'item-click': [itemKey: ItemKey];
   'item-mouseenter': [keyHash: string];
   'item-mouseleave': [];
+  'open-line-width-curve': [];
 }>();
 
 const { t } = useI18n();
