@@ -342,6 +342,7 @@ export default {
   preferSingleRecipeChain: 'Avoid Homogeneous Route Splits',
   preferSingleRecipeChainTooltip:
     'When enabled, LP keeps one deterministic candidate recipe chain per item by default; it prefers the selected recipe when present, otherwise it picks one by stable ordering instead of splitting across similar routes.',
+  plannerScenario: 'Planning Scenario',
   autoRecipePlusLP: 'Auto Recipe + LP',
   autoRecipePlusLPTooltip: 'Auto-select optimal recipes, then solve with LP',
   lpRawData: 'LP Raw Data',

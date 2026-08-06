@@ -2,11 +2,14 @@ import type {
   ItemDef,
   ItemId,
   ItemKey,
+  PackPlannerConfig,
   PackManifest,
   PackTags,
+  PlannerConstraintTerm,
   TagDef,
   ParamSchemaEntry,
   Recipe,
+  RecipePlannerMetadata,
   RecipeTypeDef,
   SlotContent,
   SlotDef,
@@ -319,6 +322,66 @@ export function assertRecipe(value: unknown, jsonPath: string): Recipe {
     params = paramsRaw;
   }
   const detailPath = assertOptionalString(obj.detailPath, `${jsonPath}.detailPath`);
+  const name = assertOptionalString(obj.name, `${jsonPath}.name`);
+  const category = assertOptionalString(obj.category, `${jsonPath}.category`);
+  const flagsRaw = assertOptionalArray(obj.flags, `${jsonPath}.flags`);
+  const flags = flagsRaw?.map((entry, index) =>
+    assertString(entry, `${jsonPath}.flags[${index}]`),
+  );
+  const locationsRaw = assertOptionalArray(obj.locations, `${jsonPath}.locations`);
+  const locations = locationsRaw?.map((entry, index) =>
+    assertString(entry, `${jsonPath}.locations[${index}]`),
+  );
+  const iconSpriteRaw = assertOptionalRecord(obj.iconSprite, `${jsonPath}.iconSprite`);
+  let iconSprite: Recipe['iconSprite'];
+  if (iconSpriteRaw !== undefined) {
+    const sizeRaw = iconSpriteRaw.size;
+    const colorRaw = iconSpriteRaw.color;
+    if (sizeRaw !== undefined && typeof sizeRaw !== 'number') {
+      throw new PackValidationError(`${jsonPath}.iconSprite.size`, 'expected number');
+    }
+    if (colorRaw !== undefined && typeof colorRaw !== 'string') {
+      throw new PackValidationError(`${jsonPath}.iconSprite.color`, 'expected string');
+    }
+    iconSprite = {
+      url: assertString(iconSpriteRaw.url, `${jsonPath}.iconSprite.url`),
+      position: assertString(iconSpriteRaw.position, `${jsonPath}.iconSprite.position`),
+      ...(sizeRaw !== undefined ? { size: sizeRaw } : {}),
+      ...(colorRaw !== undefined ? { color: colorRaw } : {}),
+    };
+  }
+  let planner: RecipePlannerMetadata | undefined;
+  if (isRecord(obj.planner)) {
+    const raw = obj.planner;
+    const cost = assertOptionalFiniteNumber(raw.cost, `${jsonPath}.planner.cost`);
+    const maxMachines = assertOptionalNonNegativeNumber(
+      raw.maxMachines,
+      `${jsonPath}.planner.maxMachines`,
+    );
+    if (raw.integer !== undefined && typeof raw.integer !== 'boolean') {
+      throw new PackValidationError(`${jsonPath}.planner.integer`, 'expected boolean');
+    }
+    const requiredEnvironmentsRaw = assertOptionalArray(
+      raw.requiredEnvironments,
+      `${jsonPath}.planner.requiredEnvironments`,
+    );
+    const requiredEnvironments = requiredEnvironmentsRaw?.map((entry, index) => {
+      const env = assertRecord(entry, `${jsonPath}.planner.requiredEnvironments[${index}]`);
+      return {
+        id: assertString(env.id, `${jsonPath}.planner.requiredEnvironments[${index}].id`),
+        amountPerSecondPerMachine: assertNonNegativeNumber(
+          env.amountPerSecondPerMachine,
+          `${jsonPath}.planner.requiredEnvironments[${index}].amountPerSecondPerMachine`,
+        ),
+      };
+    });
+    planner = {
+      ...(cost !== undefined ? { cost } : {}),
+      ...(raw.integer !== undefined ? { integer: raw.integer } : {}),
+      ...(maxMachines !== undefined ? { maxMachines } : {}),
+      ...(requiredEnvironments?.length ? { requiredEnvironments } : {}),
+    };
+  }
   const detailLoadedRaw = obj.detailLoaded;
   let detailLoaded: boolean | undefined;
   if (detailLoadedRaw !== undefined) {
@@ -333,10 +396,208 @@ export function assertRecipe(value: unknown, jsonPath: string): Recipe {
     type: assertString(obj.type, `${jsonPath}.type`),
     slotContents,
   };
+  if (name !== undefined) out.name = name;
+  if (iconSprite !== undefined) out.iconSprite = iconSprite;
+  if (category !== undefined) out.category = category;
+  if (flags !== undefined) out.flags = flags;
+  if (locations !== undefined) out.locations = locations;
+  if (planner !== undefined) out.planner = planner;
   if (params !== undefined) out.params = params;
   if (inlineItems !== undefined) out.inlineItems = inlineItems;
   if (detailPath !== undefined) out.detailPath = detailPath;
   if (detailLoaded !== undefined) out.detailLoaded = detailLoaded;
+  return out;
+}
+
+function assertFiniteNumber(value: unknown, jsonPath: string): number {
+  const number = assertNumber(value, jsonPath);
+  if (!Number.isFinite(number)) {
+    throw new PackValidationError(jsonPath, 'expected finite number');
+  }
+  return number;
+}
+
+function assertOptionalFiniteNumber(value: unknown, jsonPath: string): number | undefined {
+  return value === undefined ? undefined : assertFiniteNumber(value, jsonPath);
+}
+
+function assertNonNegativeNumber(value: unknown, jsonPath: string): number {
+  const number = assertFiniteNumber(value, jsonPath);
+  if (number < 0) throw new PackValidationError(jsonPath, 'expected non-negative number');
+  return number;
+}
+
+function assertOptionalNonNegativeNumber(value: unknown, jsonPath: string): number | undefined {
+  return value === undefined ? undefined : assertNonNegativeNumber(value, jsonPath);
+}
+
+function assertStringList(value: unknown, jsonPath: string): string[] {
+  return assertArray(value, jsonPath).map((entry, index) =>
+    assertString(entry, `${jsonPath}[${index}]`),
+  );
+}
+
+function assertNumberRecord(value: unknown, jsonPath: string): Record<string, number> {
+  const raw = assertRecord(value, jsonPath);
+  return Object.fromEntries(
+    Object.entries(raw).map(([key, entry]) => [
+      key,
+      assertNonNegativeNumber(entry, `${jsonPath}.${key}`),
+    ]),
+  );
+}
+
+function assertPlannerConstraint(
+  value: unknown,
+  jsonPath: string,
+): NonNullable<PackPlannerConfig['constraints']>[number] {
+  const raw = assertRecord(value, jsonPath);
+  const label = assertOptionalString(raw.label, `${jsonPath}.label`);
+  const lowerBound = assertOptionalFiniteNumber(raw.lowerBound, `${jsonPath}.lowerBound`);
+  const upperBound = assertOptionalFiniteNumber(raw.upperBound, `${jsonPath}.upperBound`);
+  const terms = assertArray(raw.terms, `${jsonPath}.terms`).map<PlannerConstraintTerm>(
+    (entry, index) => {
+      const term = assertRecord(entry, `${jsonPath}.terms[${index}]`);
+      const basis = term.basis;
+      if (basis !== undefined && basis !== 'machine' && basis !== 'craft_rate') {
+        throw new PackValidationError(
+          `${jsonPath}.terms[${index}].basis`,
+          'expected machine|craft_rate',
+        );
+      }
+      return {
+        recipeId: assertString(term.recipeId, `${jsonPath}.terms[${index}].recipeId`),
+        coefficient: assertFiniteNumber(
+          term.coefficient,
+          `${jsonPath}.terms[${index}].coefficient`,
+        ),
+        ...(basis !== undefined ? { basis } : {}),
+      };
+    },
+  );
+  if (lowerBound === undefined && upperBound === undefined) {
+    throw new PackValidationError(jsonPath, 'expected lowerBound or upperBound');
+  }
+  return {
+    id: assertString(raw.id, `${jsonPath}.id`),
+    ...(label !== undefined ? { label } : {}),
+    terms,
+    ...(lowerBound !== undefined ? { lowerBound } : {}),
+    ...(upperBound !== undefined ? { upperBound } : {}),
+  };
+}
+
+function assertPackPlannerConfig(value: unknown, jsonPath: string): PackPlannerConfig {
+  const raw = assertRecord(value, jsonPath);
+  const out: PackPlannerConfig = {};
+
+  if (isRecord(raw.targetRatePresets)) {
+    const presets = raw.targetRatePresets;
+    const halfPerMinute = assertOptionalNonNegativeNumber(
+      presets.halfPerMinute,
+      `${jsonPath}.targetRatePresets.halfPerMinute`,
+    );
+    const fullPerMinute = assertOptionalNonNegativeNumber(
+      presets.fullPerMinute,
+      `${jsonPath}.targetRatePresets.fullPerMinute`,
+    );
+    if ((halfPerMinute ?? 0) <= 0 && halfPerMinute !== undefined) {
+      throw new PackValidationError(`${jsonPath}.targetRatePresets.halfPerMinute`, 'expected positive number');
+    }
+    if ((fullPerMinute ?? 0) <= 0 && fullPerMinute !== undefined) {
+      throw new PackValidationError(`${jsonPath}.targetRatePresets.fullPerMinute`, 'expected positive number');
+    }
+    out.targetRatePresets = {
+      ...(halfPerMinute !== undefined ? { halfPerMinute } : {}),
+      ...(fullPerMinute !== undefined ? { fullPerMinute } : {}),
+    };
+  }
+
+  if (raw.locations !== undefined) {
+    out.locations = assertArray(raw.locations, `${jsonPath}.locations`).map((entry, index) => {
+      const location = assertRecord(entry, `${jsonPath}.locations[${index}]`);
+      return {
+        id: assertString(location.id, `${jsonPath}.locations[${index}].id`),
+        label: assertString(location.label, `${jsonPath}.locations[${index}].label`),
+      };
+    });
+  }
+  if (raw.defaultLocationIds !== undefined) {
+    out.defaultLocationIds = assertStringList(raw.defaultLocationIds, `${jsonPath}.defaultLocationIds`);
+  }
+  const defaultProfileId = assertOptionalString(raw.defaultProfileId, `${jsonPath}.defaultProfileId`);
+  if (defaultProfileId !== undefined) out.defaultProfileId = defaultProfileId;
+
+  if (raw.constraints !== undefined) {
+    out.constraints = assertArray(raw.constraints, `${jsonPath}.constraints`).map((entry, index) =>
+      assertPlannerConstraint(entry, `${jsonPath}.constraints[${index}]`),
+    );
+  }
+  if (raw.features !== undefined) {
+    out.features = assertArray(raw.features, `${jsonPath}.features`).map((entry, index) => {
+      const feature = assertRecord(entry, `${jsonPath}.features[${index}]`);
+      if (feature.defaultEnabled !== undefined && typeof feature.defaultEnabled !== 'boolean') {
+        throw new PackValidationError(
+          `${jsonPath}.features[${index}].defaultEnabled`,
+          'expected boolean',
+        );
+      }
+      return {
+        id: assertString(feature.id, `${jsonPath}.features[${index}].id`),
+        label: assertString(feature.label, `${jsonPath}.features[${index}].label`),
+        ...(feature.recipeIds !== undefined
+          ? { recipeIds: assertStringList(feature.recipeIds, `${jsonPath}.features[${index}].recipeIds`) }
+          : {}),
+        ...(feature.externalInputs !== undefined
+          ? { externalInputs: assertNumberRecord(feature.externalInputs, `${jsonPath}.features[${index}].externalInputs`) }
+          : {}),
+        ...(feature.defaultEnabled !== undefined ? { defaultEnabled: feature.defaultEnabled } : {}),
+      };
+    });
+  }
+  if (raw.profiles !== undefined) {
+    out.profiles = assertArray(raw.profiles, `${jsonPath}.profiles`).map((entry, index) => {
+      const profile = assertRecord(entry, `${jsonPath}.profiles[${index}]`);
+      return {
+        id: assertString(profile.id, `${jsonPath}.profiles[${index}].id`),
+        label: assertString(profile.label, `${jsonPath}.profiles[${index}].label`),
+        ...(profile.locationIds !== undefined
+          ? { locationIds: assertStringList(profile.locationIds, `${jsonPath}.profiles[${index}].locationIds`) }
+          : {}),
+        ...(profile.constraints !== undefined
+          ? {
+              constraints: assertArray(profile.constraints, `${jsonPath}.profiles[${index}].constraints`).map(
+                (constraint, constraintIndex) =>
+                  assertPlannerConstraint(
+                    constraint,
+                    `${jsonPath}.profiles[${index}].constraints[${constraintIndex}]`,
+                  ),
+              ),
+            }
+          : {}),
+        ...(profile.machineLimits !== undefined
+          ? { machineLimits: assertNumberRecord(profile.machineLimits, `${jsonPath}.profiles[${index}].machineLimits`) }
+          : {}),
+        ...(profile.externalInputs !== undefined
+          ? { externalInputs: assertNumberRecord(profile.externalInputs, `${jsonPath}.profiles[${index}].externalInputs`) }
+          : {}),
+        ...(profile.enabledFeatureIds !== undefined
+          ? { enabledFeatureIds: assertStringList(profile.enabledFeatureIds, `${jsonPath}.profiles[${index}].enabledFeatureIds`) }
+          : {}),
+        ...(profile.disabledRecipeIds !== undefined
+          ? { disabledRecipeIds: assertStringList(profile.disabledRecipeIds, `${jsonPath}.profiles[${index}].disabledRecipeIds`) }
+          : {}),
+      };
+    });
+  }
+  if (isRecord(raw.costWeights)) {
+    const costWeights: NonNullable<PackPlannerConfig['costWeights']> = {};
+    for (const key of ['machine', 'electric', 'footprint'] as const) {
+      const value = assertOptionalNonNegativeNumber(raw.costWeights[key], `${jsonPath}.costWeights.${key}`);
+      if (value !== undefined) costWeights[key] = value;
+    }
+    out.costWeights = costWeights;
+  }
   return out;
 }
 
@@ -380,55 +641,7 @@ export function assertPackManifest(value: unknown, jsonPath: string): PackManife
     out.startupDialog = startupDialog;
   }
 
-  if (isRecord(obj.planner)) {
-    const planner = obj.planner;
-    let targetRatePresets: NonNullable<PackManifest['planner']>['targetRatePresets'];
-
-    if (isRecord(planner.targetRatePresets)) {
-      const presets = planner.targetRatePresets;
-      const halfPerMinuteRaw = presets.halfPerMinute;
-      const fullPerMinuteRaw = presets.fullPerMinute;
-
-      let halfPerMinute: number | undefined;
-      if (halfPerMinuteRaw !== undefined) {
-        halfPerMinute = assertNumber(
-          halfPerMinuteRaw,
-          `${jsonPath}.planner.targetRatePresets.halfPerMinute`,
-        );
-        if (!Number.isFinite(halfPerMinute) || halfPerMinute <= 0) {
-          throw new PackValidationError(
-            `${jsonPath}.planner.targetRatePresets.halfPerMinute`,
-            'expected positive number',
-          );
-        }
-      }
-
-      let fullPerMinute: number | undefined;
-      if (fullPerMinuteRaw !== undefined) {
-        fullPerMinute = assertNumber(
-          fullPerMinuteRaw,
-          `${jsonPath}.planner.targetRatePresets.fullPerMinute`,
-        );
-        if (!Number.isFinite(fullPerMinute) || fullPerMinute <= 0) {
-          throw new PackValidationError(
-            `${jsonPath}.planner.targetRatePresets.fullPerMinute`,
-            'expected positive number',
-          );
-        }
-      }
-
-      if (halfPerMinute !== undefined || fullPerMinute !== undefined) {
-        targetRatePresets = {
-          ...(halfPerMinute !== undefined ? { halfPerMinute } : {}),
-          ...(fullPerMinute !== undefined ? { fullPerMinute } : {}),
-        };
-      }
-    }
-
-    if (targetRatePresets !== undefined) {
-      out.planner = { targetRatePresets };
-    }
-  }
+  if (isRecord(obj.planner)) out.planner = assertPackPlannerConfig(obj.planner, `${jsonPath}.planner`);
 
   if (isRecord(obj.imageProxy)) {
     const ip = obj.imageProxy;

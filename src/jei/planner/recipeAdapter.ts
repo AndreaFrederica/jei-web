@@ -47,6 +47,8 @@ export interface NormalizedRecipe {
 
   /** Default power/pollution from recipeType.defaults */
   defaultPower?: number;
+  machinePower?: number;
+  machineFootprint?: number;
   defaultPollution?: number;
   defaultSpeed?: number;
 }
@@ -159,6 +161,8 @@ export function normalizeRecipe(
 
   const defaults = recipeType?.defaults ?? {};
   const rawPower = finiteOr(defaults.power, NaN);
+  const rawUsage = finiteOr(recipe.params?.usage, NaN);
+  const rawFootprint = finiteOr(defaults.footprint, NaN);
   const rawPollution = finiteOr(defaults.pollution, NaN);
   const rawSpeed = finiteOr(defaults.speed, NaN);
   const effectiveSpeed = Number.isFinite(rawSpeed) && rawSpeed > 0 ? rawSpeed : 1;
@@ -188,7 +192,10 @@ export function normalizeRecipe(
   };
   if (machineId !== undefined) result.machineId = machineId;
   if (machineName !== undefined) result.machineName = machineName;
-  if (Number.isFinite(rawPower)) result.defaultPower = rawPower;
+  if (Number.isFinite(rawUsage)) result.defaultPower = rawUsage;
+  else if (Number.isFinite(rawPower)) result.defaultPower = rawPower;
+  if (Number.isFinite(rawPower)) result.machinePower = rawPower;
+  if (Number.isFinite(rawFootprint)) result.machineFootprint = rawFootprint;
   if (Number.isFinite(rawPollution)) result.defaultPollution = rawPollution;
   if (Number.isFinite(rawSpeed)) result.defaultSpeed = rawSpeed;
   return result;

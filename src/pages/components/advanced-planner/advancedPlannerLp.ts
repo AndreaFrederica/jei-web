@@ -17,6 +17,8 @@ export async function solveAdvancedPlannerLp(input: {
   integerMachines: boolean;
   discreteMachineRates: boolean;
   preferSingleRecipeChain: boolean;
+  plannerProfileId?: string;
+  enabledPlannerFeatureIds?: Set<string>;
 }): Promise<{ result: PlannerResult; mergedRecipeSelections: Map<string, string> }> {
   const objectives: ObjectiveState[] = input.targets.map((target, index) => ({
     id: `obj_${index}`,
@@ -36,6 +38,13 @@ export async function solveAdvancedPlannerLp(input: {
     integerMachines: input.integerMachines,
     discreteMachineRates: input.discreteMachineRates,
     preferSingleRecipeChain: input.preferSingleRecipeChain,
+    ...(input.pack.manifest.planner ? { plannerConfig: input.pack.manifest.planner } : {}),
+    plannerSettings: {
+      ...(input.plannerProfileId ? { profileId: input.plannerProfileId } : {}),
+      ...(input.enabledPlannerFeatureIds
+        ? { enabledFeatureIds: input.enabledPlannerFeatureIds }
+        : {}),
+    },
   });
 
   return {

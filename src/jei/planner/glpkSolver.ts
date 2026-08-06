@@ -86,7 +86,7 @@ let _moduleLoaded = false;
 let _modulePromise: Promise<void> | null = null;
 
 function glpkWasmLocation(): string {
-  if (typeof window === 'undefined') {
+  if (typeof process !== 'undefined' && process.versions?.node) {
     const cwd = typeof process !== 'undefined' ? process.cwd() : '';
     if (cwd) return `${cwd.replace(/\\/g, '/')}/public/glpk.all.wasm`;
   }
@@ -121,6 +121,10 @@ export async function solveLp(
   const integerMachines = options.integerMachines === true;
   const discreteMachineRates = integerMachines && options.discreteMachineRates !== false;
   const machineRateUnitsPerMachine = discreteMachineRates ? 4 : 1;
+  const hasSelectiveIntegerRecipes = Array.from(state.recipes.values()).some(
+    (recipe) => recipe.planner?.integer === true,
+  );
+  const solveAsMip = integerMachines || hasSelectiveIntegerRecipes;
 
   // ── Variable registries ───────────────────────────────────────────────────
 
@@ -128,6 +132,10 @@ export async function solveLp(
   const recipeVars = new Map<string, Variable>();
   /** recipeId → actual machine-count variable */
   const recipeMachineVars = new Map<string, Variable>();
+  /** recipeId → crafts/s represented by one unit of the recipe variable */
+  const recipeRateScales = new Map<string, number>();
+  /** recipeId → machine equivalents represented by one unit of the recipe variable */
+  const recipeMachineScales = new Map<string, number>();
   /** itemHash → surplus variable */
   const surplusVars = new Map<string, Variable>();
   /** itemHash → external-input variable (for Input objectives) */
@@ -141,22 +149,43 @@ export async function solveLp(
 
   // ── Add recipe variables ──────────────────────────────────────────────────
 
+  const recipeCostPerMachine = (recipeId: string): number => {
+    const recipe = state.recipes.get(recipeId);
+    const declared = recipe?.planner?.cost;
+    if (typeof declared === 'number' && Number.isFinite(declared)) return declared;
+
+    const norm = state.normalizedRecipes.get(recipeId);
+    const weights = state.plannerScenario.costWeights;
+    const machineWeight = weights.machine ?? costs.machines;
+    let calculated = 0;
+    if (norm?.machinePower && weights.electric) {
+      calculated += machineWeight * weights.electric * norm.machinePower;
+    }
+    if (norm?.machineFootprint && weights.footprint) {
+      calculated += machineWeight * weights.footprint * norm.machineFootprint;
+    }
+    return calculated || machineWeight;
+  };
+
   for (const [recipeId, norm] of state.normalizedRecipes) {
-    if (!integerMachines) {
+    const selectiveInteger = state.recipes.get(recipeId)?.planner?.integer === true;
+    if (!integerMachines && !selectiveInteger) {
       const v = model.addVar({
         name: `x_${recipeId}`,
         lb: 0,
-        obj: costs.machines * norm.time,
+        obj: recipeCostPerMachine(recipeId) * norm.time,
       });
       recipeVars.set(recipeId, v);
+      recipeRateScales.set(recipeId, 1);
+      recipeMachineScales.set(recipeId, norm.time);
       continue;
     }
 
-    if (discreteMachineRates) {
+    if (discreteMachineRates && !selectiveInteger) {
       const machineVar = model.addVar({
         name: `m_${recipeId}`,
         lb: 0,
-        obj: costs.machines,
+        obj: recipeCostPerMachine(recipeId),
         type: 'int' as const,
       });
       const rateVar = model.addVar({
@@ -175,17 +204,21 @@ export async function solveLp(
       });
       recipeVars.set(recipeId, rateVar);
       recipeMachineVars.set(recipeId, machineVar);
+      recipeRateScales.set(recipeId, 1 / norm.time / machineRateUnitsPerMachine);
+      recipeMachineScales.set(recipeId, 1 / machineRateUnitsPerMachine);
       continue;
     }
 
     const v = model.addVar({
       name: `x_${recipeId}`,
       lb: 0,
-      obj: costs.machines,
+      obj: recipeCostPerMachine(recipeId),
       type: 'int' as const,
     });
     recipeVars.set(recipeId, v);
     recipeMachineVars.set(recipeId, v);
+    recipeRateScales.set(recipeId, 1 / norm.time);
+    recipeMachineScales.set(recipeId, 1);
   }
 
   // ── Add item-level variables ──────────────────────────────────────────────
@@ -196,14 +229,18 @@ export async function solveLp(
     // Surplus (always present, small penalty)
     surplusVars.set(h, model.addVar({ name: `surplus_${h}`, lb: 0, obj: costs.surplus }));
 
-    // External input (only for Input objectives)
-    if (iv?.in && iv.in.toNumber() > 0) {
+    // External input from user objectives and/or the selected pack profile.
+    const itemId = state.itemKeyByHash.get(h)?.id;
+    const profileInput = itemId ? (state.plannerScenario.externalInputs.get(itemId) ?? 0) : 0;
+    const objectiveInput = iv?.in?.toNumber() ?? 0;
+    const externalInputLimit = profileInput + objectiveInput;
+    if (externalInputLimit > 0) {
       extVars.set(
         h,
         model.addVar({
           name: `ext_${h}`,
           lb: 0,
-          ub: iv.in.toNumber(),
+          ub: externalInputLimit,
           obj: 0,
         }),
       );
@@ -260,11 +297,7 @@ export async function solveLp(
       const netPerCraft = outAmt - inAmt;
       if (netPerCraft === 0) continue;
 
-      const coeff = !integerMachines
-        ? netPerCraft
-        : discreteMachineRates
-          ? netPerCraft / norm.time / machineRateUnitsPerMachine
-          : netPerCraft / norm.time;
+      const coeff = netPerCraft * (recipeRateScales.get(recipeId) ?? 0);
       coeffs.push([xVar, coeff]);
     }
 
@@ -308,16 +341,71 @@ export async function solveLp(
       if (!xVar) continue;
       const inAmt = norm.inputByHash.get(h) ?? 0;
       if (inAmt <= 0) continue;
-      const coeff = !integerMachines
-        ? inAmt
-        : discreteMachineRates
-          ? inAmt / norm.time / machineRateUnitsPerMachine
-          : inAmt / norm.time;
+      const coeff = inAmt * (recipeRateScales.get(recipeId) ?? 0);
       coeffs.push([xVar, coeff]);
     }
 
     if (coeffs.length === 0) continue;
     model.addConstr({ name: `limit_${h}`, ub: limit, coeffs });
+  }
+
+  const addMachineTerm = (
+    coeffs: Array<[Variable, number]>,
+    recipeId: string,
+    coefficient: number,
+  ): void => {
+    const allocatedMachineVar = recipeMachineVars.get(recipeId);
+    if (allocatedMachineVar && discreteMachineRates) {
+      coeffs.push([allocatedMachineVar, coefficient]);
+      return;
+    }
+    const recipeVar = recipeVars.get(recipeId);
+    if (!recipeVar) return;
+    coeffs.push([recipeVar, coefficient * (recipeMachineScales.get(recipeId) ?? 0)]);
+  };
+
+  // Per-recipe direct bounds.
+  for (const [recipeId, recipe] of state.recipes) {
+    const maxMachines = recipe.planner?.maxMachines;
+    if (typeof maxMachines !== 'number' || !Number.isFinite(maxMachines)) continue;
+    const coeffs: Array<[Variable, number]> = [];
+    addMachineTerm(coeffs, recipeId, 1);
+    if (coeffs.length) model.addConstr({ name: `recipe_machine_limit_${recipeId}`, ub: maxMachines, coeffs });
+  }
+
+  // Machine group limits from the selected profile.
+  for (const [machineId, limit] of state.plannerScenario.machineLimits) {
+    const coeffs: Array<[Variable, number]> = [];
+    for (const [recipeId, norm] of state.normalizedRecipes) {
+      if (norm.machineId === machineId) addMachineTerm(coeffs, recipeId, 1);
+    }
+    if (coeffs.length) model.addConstr({ name: `machine_limit_${machineId}`, ub: limit, coeffs });
+  }
+
+  // Generic pack-declared linear constraints. Machine-basis terms are converted
+  // to active machine equivalents; craft-rate terms remain crafts per second.
+  for (const constraint of state.plannerScenario.constraints) {
+    const coeffs: Array<[Variable, number]> = [];
+    for (const term of constraint.terms) {
+      if (term.basis === 'craft_rate') {
+        const recipeVar = recipeVars.get(term.recipeId);
+        if (recipeVar) {
+          coeffs.push([
+            recipeVar,
+            term.coefficient * (recipeRateScales.get(term.recipeId) ?? 0),
+          ]);
+        }
+      } else {
+        addMachineTerm(coeffs, term.recipeId, term.coefficient);
+      }
+    }
+    if (!coeffs.length) continue;
+    model.addConstr({
+      name: `planner_constraint_${constraint.id}`,
+      ...(constraint.lowerBound !== undefined ? { lb: constraint.lowerBound } : {}),
+      ...(constraint.upperBound !== undefined ? { ub: constraint.upperBound } : {}),
+      coeffs,
+    });
   }
 
   // ── Solve ─────────────────────────────────────────────────────────────────
@@ -326,7 +414,7 @@ export async function solveLp(
 
   let returnCode: string = String(simplexReturnCode);
   let status: string = String(model.status);
-  if (integerMachines) {
+  if (solveAsMip) {
     const mipReturnCode = model.intopt({ msgLevel: 'off', presolve: true });
     returnCode = String(mipReturnCode);
     status = String(model.statusMIP);
@@ -339,7 +427,7 @@ export async function solveLp(
     resultType = ResultType.Solved;
   } else if (status === 'infeasible' || status === 'no_feasible') {
     resultType = ResultType.Infeasible;
-  } else if (!integerMachines && status === 'unbounded') {
+  } else if (!solveAsMip && status === 'unbounded') {
     resultType = ResultType.Unbounded;
   } else {
     // 'undefined' or any solver error — treat as infeasible
@@ -348,7 +436,7 @@ export async function solveLp(
 
   let unboundedRecipeId: string | undefined;
   let unboundedItemHash: string | undefined;
-  if (!integerMachines && resultType === ResultType.Unbounded) {
+  if (!solveAsMip && resultType === ResultType.Unbounded) {
     try {
       const ray = model.ray;
       for (const [recipeId, variable] of recipeVars) {
@@ -375,47 +463,37 @@ export async function solveLp(
   const recipeRates = new Map<string, number>();
   const recipeMachineCounts = new Map<string, number>();
   for (const [id, v] of recipeVars) {
-    const norm = state.normalizedRecipes.get(id);
-    const rawValue = integerMachines ? v.valueMIP : v.value;
-    const rate = !integerMachines
-      ? rawValue
-      : discreteMachineRates && norm
-        ? rawValue / machineRateUnitsPerMachine / norm.time
-        : norm
-          ? rawValue / norm.time
-          : 0;
-    const machineValue = !integerMachines
-      ? norm
-        ? rate * norm.time
-        : 0
-      : discreteMachineRates
+    const rawValue = solveAsMip ? v.valueMIP : v.value;
+    const rate = rawValue * (recipeRateScales.get(id) ?? 0);
+    const machineValue =
+      discreteMachineRates && integerMachines
         ? Math.max(recipeMachineVars.get(id)?.valueMIP ?? 0, 0)
-        : Math.max(rawValue, 0);
+        : Math.max(rawValue * (recipeMachineScales.get(id) ?? 0), 0);
     recipeRates.set(id, Math.max(rate, 0));
     recipeMachineCounts.set(id, machineValue);
   }
 
   const surpluses = new Map<string, number>();
   for (const [h, v] of surplusVars) {
-    const val = integerMachines ? v.valueMIP : v.value;
+    const val = solveAsMip ? v.valueMIP : v.value;
     if (val > 1e-9) surpluses.set(h, val);
   }
 
   const externalInputs = new Map<string, number>();
   for (const [h, v] of extVars) {
-    const val = integerMachines ? v.valueMIP : v.value;
+    const val = solveAsMip ? v.valueMIP : v.value;
     if (val > 1e-9) externalInputs.set(h, val);
   }
 
   const maximizeValues = new Map<string, number>();
   for (const [h, v] of maxVars) {
-    const val = integerMachines ? v.valueMIP : v.value;
+    const val = solveAsMip ? v.valueMIP : v.value;
     if (val > 1e-9) maximizeValues.set(h, val);
   }
 
   const unproduceableValues = new Map<string, number>();
   for (const [h, v] of unprodVars) {
-    const val = integerMachines ? v.valueMIP : v.value;
+    const val = solveAsMip ? v.valueMIP : v.value;
     if (val > 1e-9) unproduceableValues.set(h, val);
   }
 
@@ -429,7 +507,7 @@ export async function solveLp(
     unproduceableValues,
     objectiveValue:
       resultType === ResultType.Solved
-        ? integerMachines
+        ? solveAsMip
           ? model.valueMIP
           : model.value
         : Infinity,

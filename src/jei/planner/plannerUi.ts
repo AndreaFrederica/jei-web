@@ -63,6 +63,8 @@ export type PlannerSavePayload = {
   integerMachines?: boolean;
   discreteMachineRates?: boolean;
   preferSingleRecipeChain?: boolean;
+  plannerProfileId?: string;
+  enabledPlannerFeatureIds?: string[];
   selectedRecipeIdByItemKeyHash: Record<string, string>;
   selectedItemIdByTagId: Record<string, ItemId>;
   /** 'advanced' = use LP-backed multi-objective planner */
@@ -84,6 +86,8 @@ export type PlannerInitialState = {
   integerMachines?: boolean;
   discreteMachineRates?: boolean;
   preferSingleRecipeChain?: boolean;
+  plannerProfileId?: string;
+  enabledPlannerFeatureIds?: string[];
   selectedRecipeIdByItemKeyHash: Record<string, string>;
   selectedItemIdByTagId: Record<string, ItemId>;
   forcedRawItemKeyHashes?: string[];
@@ -97,6 +101,8 @@ export type PlannerLiveState = {
   integerMachines?: boolean;
   discreteMachineRates?: boolean;
   preferSingleRecipeChain?: boolean;
+  plannerProfileId?: string;
+  enabledPlannerFeatureIds?: string[];
   selectedRecipeIdByItemKeyHash: Record<string, string>;
   selectedItemIdByTagId: Record<string, ItemId>;
   forcedRawItemKeyHashes?: string[];

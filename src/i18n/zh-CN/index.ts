@@ -338,6 +338,7 @@ export default {
   preferSingleRecipeChain: '避免同质线路分流',
   preferSingleRecipeChainTooltip:
     '启用后，LP 对每个物品默认只保留一个确定性的候选配方链；优先使用已选配方，否则按稳定排序选择一个，避免相近线路被均分。',
+  plannerScenario: '规划场景',
   autoRecipePlusLP: '自动配方 + LP',
   autoRecipePlusLPTooltip: '自动选择最优配方，然后用 LP 求解',
   lpRawData: 'LP 原始数据',

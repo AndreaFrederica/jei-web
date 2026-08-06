@@ -1,18 +1,20 @@
 # About
 
 ## Build
-- Version: pages-build-13-g2f7e471-dirty
-- Commit: 2f7e471 (2f7e4718ae873be674b017508e2d952a81a942ae)
-- Commit count: 171
-- Subject: fix: 重置规划器状态以解决加载保存计划时的潜在问题
+- Version: pages-build-14-g9b5b7eb-dirty
+- Commit: 9b5b7eb (9b5b7eb9a8ceff9679b762289f4402680143717b)
+- Commit count: 172
+- Subject: feat: 添加终末地蓝图库插件，支持按物品名搜索蓝图
 - Author: AndreaFrederica
-- Date: 2026-04-22T05:34:32+08:00
-- Generated at: 2026-04-24T16:57:08.539Z
+- Date: 2026-04-26T00:24:18+08:00
+- Generated at: 2026-07-27T11:39:46.724Z
 - Remote: https://github.com/AndreaFrederica/jei-web.git
 
 ## Version History
 
-### Unreleased (2026-04-22T05:34:32+08:00)
+### Unreleased (2026-04-26T00:24:18+08:00)
+- 9b5b7eb 2026-04-26T00:24:18+08:00
+  feat: 添加终末地蓝图库插件，支持按物品名搜索蓝图
 - 2f7e471 2026-04-22T05:34:32+08:00
   fix: 重置规划器状态以解决加载保存计划时的潜在问题
 - b321ce1 2026-04-22T05:03:48+08:00

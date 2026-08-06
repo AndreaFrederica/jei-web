@@ -5,6 +5,7 @@ import type {
   JeiWebWikiRendererDef,
   PackData,
   PackManifest,
+  PackPlannerConfig,
   PackTags,
   Recipe,
   RecipeTypeDef,
@@ -1218,6 +1219,23 @@ function transformRecipeForAggregate(recipe: Recipe, runtime: AggregateSourceRun
     slotContents: remapSlotContentsForAggregate(recipe.slotContents, runtime.itemIdAlias),
     sourcePackIds: [runtime.packId],
   };
+  if (recipe.name !== undefined) out.name = recipe.name;
+  if (recipe.iconSprite !== undefined) out.iconSprite = { ...recipe.iconSprite };
+  if (recipe.category !== undefined) out.category = recipe.category;
+  if (recipe.flags !== undefined) out.flags = [...recipe.flags];
+  if (recipe.locations !== undefined) out.locations = [...recipe.locations];
+  if (recipe.planner !== undefined) {
+    out.planner = {
+      ...recipe.planner,
+      ...(recipe.planner.requiredEnvironments
+        ? {
+            requiredEnvironments: recipe.planner.requiredEnvironments.map((environment) => ({
+              ...environment,
+            })),
+          }
+        : {}),
+    };
+  }
   if (recipe.params !== undefined) out.params = { ...recipe.params };
   if (recipe.inlineItems !== undefined) {
     out.inlineItems = recipe.inlineItems.map((item) => transformItemForAggregate(item, runtime));
@@ -1608,6 +1626,36 @@ function mergeRecipeForAggregate(base: Recipe, incoming: Recipe): Recipe {
   const mergedSourcePackIds = mergeStringArrayStable(base.sourcePackIds, incoming.sourcePackIds);
   if (mergedSourcePackIds !== undefined) out.sourcePackIds = mergedSourcePackIds;
   else delete out.sourcePackIds;
+  const name = pickPreferLongerString(base.name, incoming.name);
+  if (name !== undefined) out.name = name;
+  else delete out.name;
+  const category = pickPreferLongerString(base.category, incoming.category);
+  if (category !== undefined) out.category = category;
+  else delete out.category;
+  const iconSprite = base.iconSprite ?? incoming.iconSprite;
+  if (iconSprite !== undefined) out.iconSprite = { ...iconSprite };
+  else delete out.iconSprite;
+  const flags = mergeStringArrayStable(base.flags, incoming.flags);
+  if (flags !== undefined) out.flags = flags;
+  else delete out.flags;
+  const locations = base.locations?.length ? base.locations : incoming.locations;
+  if (locations?.length) out.locations = [...locations];
+  else delete out.locations;
+  const planner = base.planner ?? incoming.planner;
+  if (planner !== undefined) {
+    out.planner = {
+      ...planner,
+      ...(planner.requiredEnvironments
+        ? {
+            requiredEnvironments: planner.requiredEnvironments.map((environment) => ({
+              ...environment,
+            })),
+          }
+        : {}),
+    };
+  } else {
+    delete out.planner;
+  }
   const detailPath = pickPreferLongerString(base.detailPath, incoming.detailPath);
   if (detailPath !== undefined) out.detailPath = detailPath;
   else delete out.detailPath;
@@ -1628,6 +1676,91 @@ function mergeRecipeForAggregate(base: Recipe, incoming: Recipe): Recipe {
   if (inlineItems) out.inlineItems = inlineItems;
   else delete out.inlineItems;
   return out;
+}
+
+function transformPlannerConfigForAggregate(
+  config: PackPlannerConfig,
+  runtime: AggregateSourceRuntime,
+  mergedRecipeIdByTransformedId: ReadonlyMap<string, string>,
+): PackPlannerConfig {
+  const remapRecipeId = (recipeId: string): string => {
+    const transformedId = `${runtime.recipeIdPrefix}${recipeId}`;
+    return mergedRecipeIdByTransformedId.get(transformedId) ?? transformedId;
+  };
+  const remapItemNumbers = (
+    values: Record<string, number>,
+  ): Record<string, number> => {
+    const out: Record<string, number> = {};
+    Object.entries(values).forEach(([itemId, value]) => {
+      const remappedId = remapItemIdByAlias(itemId, runtime.itemIdAlias);
+      out[remappedId] = (out[remappedId] ?? 0) + value;
+    });
+    return out;
+  };
+  const remapConstraint = (
+    constraint: NonNullable<PackPlannerConfig['constraints']>[number],
+  ) => ({
+    ...constraint,
+    terms: constraint.terms.map((term) => ({
+      ...term,
+      recipeId: remapRecipeId(term.recipeId),
+    })),
+  });
+
+  return {
+    ...(config.targetRatePresets ? { targetRatePresets: { ...config.targetRatePresets } } : {}),
+    ...(config.locations
+      ? { locations: config.locations.map((location) => ({ ...location })) }
+      : {}),
+    ...(config.defaultLocationIds
+      ? { defaultLocationIds: [...config.defaultLocationIds] }
+      : {}),
+    ...(config.defaultProfileId ? { defaultProfileId: config.defaultProfileId } : {}),
+    ...(config.features
+      ? {
+          features: config.features.map((feature) => ({
+            ...feature,
+            ...(feature.recipeIds
+              ? { recipeIds: feature.recipeIds.map((recipeId) => remapRecipeId(recipeId)) }
+              : {}),
+            ...(feature.externalInputs
+              ? { externalInputs: remapItemNumbers(feature.externalInputs) }
+              : {}),
+          })),
+        }
+      : {}),
+    ...(config.constraints
+      ? { constraints: config.constraints.map((constraint) => remapConstraint(constraint)) }
+      : {}),
+    ...(config.profiles
+      ? {
+          profiles: config.profiles.map((profile) => ({
+            ...profile,
+            ...(profile.locationIds ? { locationIds: [...profile.locationIds] } : {}),
+            ...(profile.constraints
+              ? { constraints: profile.constraints.map((constraint) => remapConstraint(constraint)) }
+              : {}),
+            ...(profile.machineLimits
+              ? { machineLimits: remapItemNumbers(profile.machineLimits) }
+              : {}),
+            ...(profile.externalInputs
+              ? { externalInputs: remapItemNumbers(profile.externalInputs) }
+              : {}),
+            ...(profile.enabledFeatureIds
+              ? { enabledFeatureIds: [...profile.enabledFeatureIds] }
+              : {}),
+            ...(profile.disabledRecipeIds
+              ? {
+                  disabledRecipeIds: profile.disabledRecipeIds.map((recipeId) =>
+                    remapRecipeId(recipeId),
+                  ),
+                }
+              : {}),
+          })),
+        }
+      : {}),
+    ...(config.costWeights ? { costWeights: { ...config.costWeights } } : {}),
+  };
 }
 
 function remapTagValueForAggregate(value: TagValue, alias: Map<string, string>): TagValue {
@@ -2336,6 +2469,14 @@ async function loadAggregatePack(
     });
 
     const mergedRecipes = mergeRecipesBySignatureForAggregate(transformedRecipes);
+    const mergedRecipeIdBySignature = new Map(
+      mergedRecipes.map((recipe) => [recipeSignatureForAggregate(recipe), recipe.id]),
+    );
+    const mergedRecipeIdByTransformedId = new Map<string, string>();
+    transformedRecipes.forEach((recipe) => {
+      const mergedId = mergedRecipeIdBySignature.get(recipeSignatureForAggregate(recipe));
+      if (mergedId) mergedRecipeIdByTransformedId.set(recipe.id, mergedId);
+    });
     const mergedItems = mergeInlineItems(Array.from(mergedItemsByHash.values()), mergedRecipes);
     const wikiData = extractWikiData(mergedItems);
 
@@ -2351,6 +2492,19 @@ async function loadAggregatePack(
       version: `${primaryManifest.version}+agg(${descriptor.sources.map((s) => s.packId).join(',')})`,
     };
     delete manifest.imageProxy;
+    const plannerSourceIndex = loadedByPriority.findIndex(({ pack }) =>
+      Boolean(pack.manifest.planner),
+    );
+    if (plannerSourceIndex >= 0) {
+      const sourcePlanner = loadedByPriority[plannerSourceIndex]!.pack.manifest.planner!;
+      manifest.planner = transformPlannerConfigForAggregate(
+        sourcePlanner,
+        sourceRuntimes[plannerSourceIndex]!,
+        mergedRecipeIdByTransformedId,
+      );
+    } else {
+      delete manifest.planner;
+    }
 
     const out: PackData = {
       manifest,

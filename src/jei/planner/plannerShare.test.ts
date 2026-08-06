@@ -18,6 +18,9 @@ describe('plannerShare', () => {
     useProductRecovery: true,
     integerMachines: true,
     discreteMachineRates: true,
+    preferSingleRecipeChain: false,
+    plannerProfileId: 'jinlong-1.4',
+    enabledPlannerFeatureIds: ['water-node', 'tundra-transfer'],
     selectedRecipeIdByItemKeyHash: {
       'iron-plate': 'smelt-iron',
     },

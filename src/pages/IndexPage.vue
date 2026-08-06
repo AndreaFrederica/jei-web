@@ -602,6 +602,9 @@ type SavedPlan = {
   useProductRecovery?: boolean;
   integerMachines?: boolean;
   discreteMachineRates?: boolean;
+  preferSingleRecipeChain?: boolean;
+  plannerProfileId?: string;
+  enabledPlannerFeatureIds?: string[];
   selectedRecipeIdByItemKeyHash: Record<string, string>;
   selectedItemIdByTagId: Record<string, string>;
   createdAt: number;
@@ -620,6 +623,7 @@ function createDefaultPlannerLiveState(): PlannerLiveState {
     useProductRecovery: false,
     integerMachines: true,
     discreteMachineRates: true,
+    preferSingleRecipeChain: true,
     selectedRecipeIdByItemKeyHash: {},
     selectedItemIdByTagId: {},
     forcedRawItemKeyHashes: [],
@@ -2159,6 +2163,11 @@ function openPlannerPayload(payload: PlannerSavePayload, loadKey = `share:${Date
     useProductRecovery: payload.useProductRecovery === true,
     integerMachines: payload.integerMachines !== false,
     discreteMachineRates: payload.discreteMachineRates !== false,
+    preferSingleRecipeChain: payload.preferSingleRecipeChain !== false,
+    ...(payload.plannerProfileId ? { plannerProfileId: payload.plannerProfileId } : {}),
+    ...(payload.enabledPlannerFeatureIds
+      ? { enabledPlannerFeatureIds: payload.enabledPlannerFeatureIds }
+      : {}),
     selectedRecipeIdByItemKeyHash: payload.selectedRecipeIdByItemKeyHash,
     selectedItemIdByTagId: payload.selectedItemIdByTagId,
     forcedRawItemKeyHashes: payload.forcedRawItemKeyHashes ?? [],
@@ -3925,12 +3934,24 @@ function normalizePlannerLiveState(v: unknown): PlannerLiveState {
     ? obj.forcedRawItemKeyHashes.filter((entry): entry is string => typeof entry === 'string')
     : [];
   const viewState = normalizeAdvancedPlannerViewState(obj.viewState);
+  const plannerProfileId =
+    typeof obj.plannerProfileId === 'string' && obj.plannerProfileId.length > 0
+      ? obj.plannerProfileId
+      : undefined;
+  const enabledPlannerFeatureIds = Array.isArray(obj.enabledPlannerFeatureIds)
+    ? obj.enabledPlannerFeatureIds.filter(
+        (entry): entry is string => typeof entry === 'string',
+      )
+    : undefined;
   return {
     targetAmount: Number.isFinite(targetAmountRaw) && targetAmountRaw > 0 ? targetAmountRaw : 1,
     targetUnit,
     useProductRecovery: obj.useProductRecovery === true,
     integerMachines: obj.integerMachines !== false,
     discreteMachineRates: obj.discreteMachineRates !== false,
+    preferSingleRecipeChain: obj.preferSingleRecipeChain !== false,
+    ...(plannerProfileId ? { plannerProfileId } : {}),
+    ...(enabledPlannerFeatureIds ? { enabledPlannerFeatureIds } : {}),
     selectedRecipeIdByItemKeyHash: normalizeStringRecord(obj.selectedRecipeIdByItemKeyHash),
     selectedItemIdByTagId: normalizeStringRecord(obj.selectedItemIdByTagId),
     forcedRawItemKeyHashes,
@@ -3985,6 +4006,16 @@ async function loadPlans(packId: string): Promise<SavedPlan[]> {
         const useProductRecovery = obj.useProductRecovery === true;
         const integerMachines = obj.integerMachines !== false;
         const discreteMachineRates = obj.discreteMachineRates !== false;
+        const preferSingleRecipeChain = obj.preferSingleRecipeChain !== false;
+        const plannerProfileId =
+          typeof obj.plannerProfileId === 'string' && obj.plannerProfileId.length > 0
+            ? obj.plannerProfileId
+            : undefined;
+        const enabledPlannerFeatureIds = Array.isArray(obj.enabledPlannerFeatureIds)
+          ? obj.enabledPlannerFeatureIds.filter(
+              (entry): entry is string => typeof entry === 'string',
+            )
+          : undefined;
         const createdAt = typeof obj.createdAt === 'number' ? obj.createdAt : 0;
         const kind = obj.kind === 'advanced' ? 'advanced' : undefined;
         const forcedRawItemKeyHashes = Array.isArray(obj.forcedRawItemKeyHashes)
@@ -4025,6 +4056,9 @@ async function loadPlans(packId: string): Promise<SavedPlan[]> {
           useProductRecovery,
           integerMachines,
           discreteMachineRates,
+          preferSingleRecipeChain,
+          ...(plannerProfileId ? { plannerProfileId } : {}),
+          ...(enabledPlannerFeatureIds ? { enabledPlannerFeatureIds } : {}),
           selectedRecipeIdByItemKeyHash,
           selectedItemIdByTagId,
           createdAt,
@@ -4077,6 +4111,11 @@ function savePlannerPlan(payload: PlannerSavePayload) {
     useProductRecovery: payload.useProductRecovery === true,
     integerMachines: payload.integerMachines !== false,
     discreteMachineRates: payload.discreteMachineRates !== false,
+    preferSingleRecipeChain: payload.preferSingleRecipeChain !== false,
+    ...(payload.plannerProfileId ? { plannerProfileId: payload.plannerProfileId } : {}),
+    ...(payload.enabledPlannerFeatureIds
+      ? { enabledPlannerFeatureIds: payload.enabledPlannerFeatureIds }
+      : {}),
     selectedRecipeIdByItemKeyHash: payload.selectedRecipeIdByItemKeyHash,
     selectedItemIdByTagId: payload.selectedItemIdByTagId,
     createdAt: Date.now(),
@@ -4102,6 +4141,11 @@ function openSavedPlan(p: SavedPlan) {
       useProductRecovery: p.useProductRecovery === true,
       integerMachines: p.integerMachines !== false,
       discreteMachineRates: p.discreteMachineRates !== false,
+      preferSingleRecipeChain: p.preferSingleRecipeChain !== false,
+      ...(p.plannerProfileId ? { plannerProfileId: p.plannerProfileId } : {}),
+      ...(p.enabledPlannerFeatureIds
+        ? { enabledPlannerFeatureIds: p.enabledPlannerFeatureIds }
+        : {}),
       selectedRecipeIdByItemKeyHash: p.selectedRecipeIdByItemKeyHash,
       selectedItemIdByTagId: p.selectedItemIdByTagId,
       kind: 'advanced',
@@ -4121,6 +4165,11 @@ function openSavedPlan(p: SavedPlan) {
       useProductRecovery: p.useProductRecovery === true,
       integerMachines: p.integerMachines !== false,
       discreteMachineRates: p.discreteMachineRates !== false,
+      preferSingleRecipeChain: p.preferSingleRecipeChain !== false,
+      ...(p.plannerProfileId ? { plannerProfileId: p.plannerProfileId } : {}),
+      ...(p.enabledPlannerFeatureIds
+        ? { enabledPlannerFeatureIds: p.enabledPlannerFeatureIds }
+        : {}),
       selectedRecipeIdByItemKeyHash: p.selectedRecipeIdByItemKeyHash,
       selectedItemIdByTagId: p.selectedItemIdByTagId,
       ...(p.forcedRawItemKeyHashes ? { forcedRawItemKeyHashes: p.forcedRawItemKeyHashes } : {}),

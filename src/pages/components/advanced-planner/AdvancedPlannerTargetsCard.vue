@@ -28,6 +28,36 @@
       />
     </div>
 
+    <div
+      v-if="plannerProfileOptions.length || plannerFeatures.length"
+      class="row items-center q-gutter-sm q-mb-md"
+    >
+      <q-select
+        v-if="plannerProfileOptions.length"
+        dense
+        outlined
+        emit-value
+        map-options
+        popup-content-class="planner__select-menu"
+        style="min-width: 180px; max-width: 280px"
+        :label="t('plannerScenario')"
+        :options="plannerProfileOptions"
+        :model-value="plannerProfileId"
+        @update:model-value="emit('update:planner-profile-id', String($event ?? ''))"
+      />
+      <q-toggle
+        v-for="feature in plannerFeatures"
+        :key="feature.id"
+        dense
+        color="deep-purple"
+        :label="feature.label"
+        :model-value="enabledPlannerFeatureIds.includes(feature.id)"
+        @update:model-value="
+          emit('update:planner-feature', { id: feature.id, enabled: !!$event })
+        "
+      />
+    </div>
+
     <q-list v-if="targets.length" bordered separator class="rounded-borders">
       <q-item v-for="(target, index) in targets" :key="index" class="q-pa-sm">
         <q-item-section avatar class="q-pr-sm">
@@ -206,6 +236,10 @@ defineProps<{
   integerMachines: boolean;
   discreteMachineRates: boolean;
   preferSingleRecipeChain: boolean;
+  plannerProfileId: string | null;
+  plannerProfileOptions: Array<{ label: string; value: string }>;
+  plannerFeatures: Array<{ id: string; label: string }>;
+  enabledPlannerFeatureIds: string[];
   lpSolving: boolean;
   targetUnitOptions: Array<{ label: string; value: string }>;
   objectiveTypeOptions: Array<{ label: string; value: ObjectiveType }>;
@@ -218,6 +252,8 @@ const emit = defineEmits<{
   'update:integer-machines': [value: boolean];
   'update:discrete-machine-rates': [value: boolean];
   'update:prefer-single-recipe-chain': [value: boolean];
+  'update:planner-profile-id': [value: string];
+  'update:planner-feature': [payload: { id: string; enabled: boolean }];
   'update-target-rate': [payload: { index: number; rate: number }];
   'update-target-unit': [payload: { index: number; unit: PlannerTargetUnit }];
   'update-target-type': [payload: { index: number; type: ObjectiveType }];

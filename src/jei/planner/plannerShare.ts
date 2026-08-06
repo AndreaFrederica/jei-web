@@ -31,6 +31,9 @@ type CompactPlannerSharePayload = {
     pr?: 1;
     im?: 0 | 1;
     dr?: 0 | 1;
+    pc?: 0 | 1;
+    pp?: string;
+    pf?: string[];
     sr?: Record<string, string>;
     st?: Record<string, ItemId>;
     k?: 'advanced';
@@ -134,11 +137,27 @@ function normalizePlan(value: unknown): PlannerSavePayload {
         : value.dr === 1 ||
           value.discreteMachineRates === true ||
           (value.dr === undefined && value.discreteMachineRates === undefined),
+    preferSingleRecipeChain:
+      value.pc === 0
+        ? false
+        : value.pc === 1 ||
+          value.preferSingleRecipeChain === true ||
+          (value.pc === undefined && value.preferSingleRecipeChain === undefined),
     selectedRecipeIdByItemKeyHash: normalizeStringRecord(
       value.sr ?? value.selectedRecipeIdByItemKeyHash,
     ),
     selectedItemIdByTagId: normalizeStringRecord(value.st ?? value.selectedItemIdByTagId),
   };
+  const plannerProfileIdRaw = value.pp ?? value.plannerProfileId;
+  if (typeof plannerProfileIdRaw === 'string' && plannerProfileIdRaw.length > 0) {
+    payload.plannerProfileId = plannerProfileIdRaw;
+  }
+  const enabledPlannerFeatureIdsRaw = value.pf ?? value.enabledPlannerFeatureIds;
+  if (Array.isArray(enabledPlannerFeatureIdsRaw)) {
+    payload.enabledPlannerFeatureIds = enabledPlannerFeatureIdsRaw.filter(
+      (entry): entry is string => typeof entry === 'string',
+    );
+  }
   const targetUnit = normalizeTargetUnit(value.tu ?? value.targetUnit);
   if (targetUnit) payload.targetUnit = targetUnit;
   const kind = value.k === 'advanced' || value.kind === 'advanced' ? 'advanced' : undefined;
@@ -254,6 +273,9 @@ function toCompactPlan(plan: PlannerSavePayload): CompactPlannerSharePayload['l'
     ...(plan.useProductRecovery ? { pr: 1 } : {}),
     im: plan.integerMachines !== false ? 1 : 0,
     dr: plan.discreteMachineRates !== false ? 1 : 0,
+    pc: plan.preferSingleRecipeChain !== false ? 1 : 0,
+    ...(plan.plannerProfileId ? { pp: plan.plannerProfileId } : {}),
+    ...(plan.enabledPlannerFeatureIds ? { pf: plan.enabledPlannerFeatureIds } : {}),
     ...(Object.keys(plan.selectedRecipeIdByItemKeyHash).length
       ? { sr: plan.selectedRecipeIdByItemKeyHash }
       : {}),

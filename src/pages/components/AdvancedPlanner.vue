@@ -37,6 +37,10 @@
       :integer-machines="integerMachines"
       :discrete-machine-rates="discreteMachineRates"
       :prefer-single-recipe-chain="preferSingleRecipeChain"
+      :planner-profile-id="plannerProfileId"
+      :planner-profile-options="plannerProfileOptions"
+      :planner-features="plannerFeatures"
+      :enabled-planner-feature-ids="enabledPlannerFeatureIdsList"
       :lp-solving="lpSolving"
       :target-unit-options="targetUnitOptions"
       :objective-type-options="objectiveTypeOptions"
@@ -49,6 +53,8 @@
       @update:integer-machines="integerMachines = $event"
       @update:discrete-machine-rates="discreteMachineRates = $event"
       @update:prefer-single-recipe-chain="preferSingleRecipeChain = $event"
+      @update:planner-profile-id="setPlannerProfileId"
+      @update:planner-feature="setPlannerFeatureEnabled($event.id, $event.enabled)"
       @update-target-rate="updateTargetRate($event.index, $event.rate)"
       @update-target-unit="updateTargetUnit($event.index, $event.unit)"
       @update-target-type="updateTargetType($event.index, $event.type)"
@@ -527,6 +533,19 @@ const targetUnitOptions = computed(() => [
 ]);
 const perMinuteLabel = computed(() => t('itemsPerMinute'));
 const plannerIndex = computed(() => props.index);
+const plannerConfig = computed(() => props.pack?.manifest.planner);
+const plannerProfileOptions = computed(() =>
+  (plannerConfig.value?.profiles ?? []).map((profile) => ({
+    label: profile.label,
+    value: profile.id,
+  })),
+);
+const plannerFeatures = computed(() =>
+  (plannerConfig.value?.features ?? []).map((feature) => ({
+    id: feature.id,
+    label: feature.label,
+  })),
+);
 
 const objectiveTypeOptions = computed(() => [
   { label: t('objectiveTypeOutput'), value: ObjectiveType.Output },
@@ -563,6 +582,13 @@ const useProductRecovery = ref(false);
 const integerMachines = ref(true);
 const discreteMachineRates = ref(true);
 const preferSingleRecipeChain = ref(true);
+const plannerProfileId = ref<string | null>(null);
+const enabledPlannerFeatureIds = ref<Set<string>>(new Set());
+const enabledPlannerFeatureIdsList = computed(() =>
+  plannerFeatures.value
+    .filter((feature) => enabledPlannerFeatureIds.value.has(feature.id))
+    .map((feature) => feature.id),
+);
 const selectedLineNodeId = ref<string | null>(null);
 const lineNodePositionsVueFlow = ref(new Map<string, { x: number; y: number }>());
 const lineNodePositionsG6 = ref(new Map<string, { x: number; y: number }>());
@@ -627,6 +653,46 @@ function isEmbeddedTab(value: unknown): value is NonNullable<Props['initialTab']
   );
 }
 
+function applyPlannerScenarioSelection(
+  requestedProfileId?: string,
+  requestedFeatureIds?: readonly string[],
+): void {
+  const config = plannerConfig.value;
+  const profile =
+    config?.profiles?.find((entry) => entry.id === requestedProfileId) ??
+    config?.profiles?.find((entry) => entry.id === config.defaultProfileId) ??
+    config?.profiles?.[0];
+  plannerProfileId.value = profile?.id ?? null;
+
+  const validFeatureIds = new Set((config?.features ?? []).map((feature) => feature.id));
+  const defaults =
+    profile?.enabledFeatureIds ??
+    (config?.features ?? []).filter((feature) => feature.defaultEnabled).map((feature) => feature.id);
+  enabledPlannerFeatureIds.value = new Set(
+    (requestedFeatureIds ?? defaults).filter((featureId) => validFeatureIds.has(featureId)),
+  );
+}
+
+function plannerScenarioChanged(): void {
+  emitLiveState();
+  if (lpMode.value && planningStarted.value && !lpPendingAfterDecisions.value) {
+    runLpSolve();
+  }
+}
+
+function setPlannerProfileId(profileId: string): void {
+  applyPlannerScenarioSelection(profileId);
+  plannerScenarioChanged();
+}
+
+function setPlannerFeatureEnabled(featureId: string, enabled: boolean): void {
+  const next = new Set(enabledPlannerFeatureIds.value);
+  if (enabled) next.add(featureId);
+  else next.delete(featureId);
+  enabledPlannerFeatureIds.value = next;
+  plannerScenarioChanged();
+}
+
 async function copyText(text: string): Promise<void> {
   if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
     await navigator.clipboard.writeText(text);
@@ -665,6 +731,12 @@ function buildEmbeddedPlanPayload(): PlannerSavePayload | null {
     integerMachines: initialState?.integerMachines !== false,
     discreteMachineRates: initialState?.discreteMachineRates !== false,
     preferSingleRecipeChain: initialState?.preferSingleRecipeChain !== false,
+    ...(initialState?.plannerProfileId
+      ? { plannerProfileId: initialState.plannerProfileId }
+      : {}),
+    ...(initialState?.enabledPlannerFeatureIds
+      ? { enabledPlannerFeatureIds: initialState.enabledPlannerFeatureIds }
+      : {}),
     selectedRecipeIdByItemKeyHash: initialState?.selectedRecipeIdByItemKeyHash ?? {},
     selectedItemIdByTagId: initialState?.selectedItemIdByTagId ?? {},
     kind: 'advanced',
@@ -723,6 +795,8 @@ function buildCurrentPlanPayload(
     integerMachines: integerMachines.value,
     discreteMachineRates: discreteMachineRates.value,
     preferSingleRecipeChain: preferSingleRecipeChain.value,
+    ...(plannerProfileId.value ? { plannerProfileId: plannerProfileId.value } : {}),
+    enabledPlannerFeatureIds: enabledPlannerFeatureIdsList.value,
     selectedRecipeIdByItemKeyHash: mapToRecord(selectedRecipeIdByItemKeyHash.value),
     selectedItemIdByTagId: mapToRecord(selectedItemIdByTagId.value),
     kind: 'advanced',
@@ -997,28 +1071,29 @@ const buildMergedTree = () => {
         if (!lpMode.value && !lpPendingAfterDecisions.value) {
           calcPlanDirty.value = false;
         }
-        return;
       }
     }
 
-    const virtualRoot: EnhancedRequirementNode = {
-      kind: 'item',
-      nodeId: 'virtual-root',
-      itemKey: { id: '__multi_target__' },
-      amount: 1,
-      children: trees.map((t) => t.root),
-      catalysts: [],
-      cycle: false,
-    };
+    if (trees.length > 1) {
+      const virtualRoot: EnhancedRequirementNode = {
+        kind: 'item',
+        nodeId: 'virtual-root',
+        itemKey: { id: '__multi_target__' },
+        amount: 1,
+        children: trees.map((t) => t.root),
+        catalysts: [],
+        cycle: false,
+      };
 
-    mergedTree.value = {
-      root: virtualRoot,
-      leafItemTotals,
-      leafFluidTotals,
-      catalysts,
-      totals,
-    };
-    mergedRootItemKey.value = virtualRoot.itemKey;
+      mergedTree.value = {
+        root: virtualRoot,
+        leafItemTotals,
+        leafFluidTotals,
+        catalysts,
+        totals,
+      };
+      mergedRootItemKey.value = virtualRoot.itemKey;
+    }
   } catch (e) {
     console.error('Failed to build merged tree', e);
     mergedTree.value = null;
@@ -1072,6 +1147,7 @@ const loadSavedPlan = (payload: PlannerSavePayload) => {
   integerMachines.value = payload.integerMachines !== false;
   discreteMachineRates.value = payload.discreteMachineRates !== false;
   preferSingleRecipeChain.value = payload.preferSingleRecipeChain !== false;
+  applyPlannerScenarioSelection(payload.plannerProfileId, payload.enabledPlannerFeatureIds);
   forcedRawItemKeyHashes.value = new Set(payload.forcedRawItemKeyHashes ?? []);
   applySavedViewState(payload.viewState);
   calcPlanDirty.value = false;
@@ -1091,6 +1167,31 @@ const loadSavedPlan = (payload: PlannerSavePayload) => {
   planningStarted.value = true;
   lpPendingAfterDecisions.value = lpMode.value;
   recomputePlanningState();
+
+  // 当 LP 模式开启且仍有待决策时，自动补全配方选择并求解 LP
+  if (lpMode.value && allDecisions.value.length > 0 && props.pack && props.index) {
+    const { recipeSelections, tagSelections } = collectAutoPlannerSelections({
+      targets: targets.value,
+      pack: props.pack,
+      index: props.index,
+      useProductRecovery: useProductRecovery.value,
+    });
+
+    // 合并自动选择，保留已有选择
+    const mergedRecipeMap = new Map(selectedRecipeIdByItemKeyHash.value);
+    for (const [k, v] of recipeSelections) {
+      if (!mergedRecipeMap.has(k)) mergedRecipeMap.set(k, v);
+    }
+    selectedRecipeIdByItemKeyHash.value = mergedRecipeMap;
+
+    const mergedTagMap = new Map(selectedItemIdByTagId.value);
+    for (const [k, v] of tagSelections) {
+      if (!mergedTagMap.has(k)) mergedTagMap.set(k, v);
+    }
+    selectedItemIdByTagId.value = mergedTagMap;
+
+    recomputePlanningState();
+  }
 };
 
 function applyEmbeddedPlan(): void {
@@ -1175,6 +1276,8 @@ const runLpSolve = () => {
     integerMachines: integerMachines.value,
     discreteMachineRates: discreteMachineRates.value,
     preferSingleRecipeChain: preferSingleRecipeChain.value,
+    ...(plannerProfileId.value ? { plannerProfileId: plannerProfileId.value } : {}),
+    enabledPlannerFeatureIds: new Set(enabledPlannerFeatureIds.value),
   })
     .then(({ result, mergedRecipeSelections }) => {
       if (requestId !== lpSolveRequestId) return;
@@ -1261,6 +1364,13 @@ const itemName = (itemKey: ItemKey): string => {
   return props.itemDefsByKeyHash?.[keyHash]?.name ?? itemKey.id;
 };
 
+watch(
+  () => props.pack?.manifest.planner,
+  () => {
+    applyPlannerScenarioSelection();
+  },
+  { immediate: true },
+);
 watch(
   () =>
     [
@@ -1497,6 +1607,8 @@ function emitLiveState() {
     integerMachines: integerMachines.value,
     discreteMachineRates: discreteMachineRates.value,
     preferSingleRecipeChain: preferSingleRecipeChain.value,
+    ...(plannerProfileId.value ? { plannerProfileId: plannerProfileId.value } : {}),
+    enabledPlannerFeatureIds: enabledPlannerFeatureIdsList.value,
     selectedRecipeIdByItemKeyHash: mapToRecord(selectedRecipeIdByItemKeyHash.value),
     selectedItemIdByTagId: mapToRecord(selectedItemIdByTagId.value),
     forcedRawItemKeyHashes: Array.from(forcedRawItemKeyHashes.value),

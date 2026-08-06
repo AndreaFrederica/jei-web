@@ -10,13 +10,14 @@
  * buildEnhancedRequirementTree() output so views can reuse the same rendering.
  */
 
-import type { ItemKey } from '../types';
+import type { ItemKey, PackPlannerConfig } from '../types';
 import type { JeiIndex } from '../indexing/buildIndex';
 import { itemKeyHash } from '../indexing/key';
 import type { ObjectiveState, Step, Totals, PlannerResult, LpFlowData } from './types';
 import { ResultType, MaximizeType } from './types';
 import { rational } from './rational';
 import type { Rational } from './rational';
+import type { PlannerScenarioSettings } from './plannerConfig';
 import { buildMatrixState } from './matrixState';
 import {
   solveLp,
@@ -55,6 +56,10 @@ export interface AdvancedPlannerInput {
    * allowing multiple candidate producers to coexist and split flow.
    */
   preferSingleRecipeChain?: boolean;
+  /** Declarative rules supplied by the active data pack. */
+  plannerConfig?: PackPlannerConfig;
+  /** User-selected profile and optional features. */
+  plannerSettings?: PlannerScenarioSettings;
 }
 
 // ─── Implementation ────────────────────────────────────────────────────────────
@@ -81,6 +86,8 @@ export async function solveAdvanced(input: AdvancedPlannerInput): Promise<Planne
     integerMachines = false,
     discreteMachineRates = true,
     preferSingleRecipeChain = true,
+    plannerConfig,
+    plannerSettings,
   } = input;
 
   const solverCosts = { ...DEFAULT_SOLVER_COSTS, ...costs };
@@ -95,6 +102,8 @@ export async function solveAdvanced(input: AdvancedPlannerInput): Promise<Planne
     defaultNs,
     maximizeType,
     preferSingleRecipeChain,
+    ...(plannerConfig ? { plannerConfig } : {}),
+    ...(plannerSettings ? { plannerSettings } : {}),
   });
 
   // ── 2. Solve LP ───────────────────────────────────────────────────────────
@@ -174,7 +183,7 @@ export async function solveAdvanced(input: AdvancedPlannerInput): Promise<Planne
     const stepPollution =
       norm.defaultPollution != null ? effectiveMachineCount * norm.defaultPollution : 0;
 
-    if (stepPower > 0) totalPower = totalPower.add(rational(stepPower));
+    if (Math.abs(stepPower) > 1e-12) totalPower = totalPower.add(rational(stepPower));
     if (stepPollution > 0) totalPollution = totalPollution.add(rational(stepPollution));
 
     // Accumulate machines by machine type
@@ -199,7 +208,7 @@ export async function solveAdvanced(input: AdvancedPlannerInput): Promise<Planne
       perSecond: itemsRational,
       perMinute: rational(itemsPerSecond * 60),
       perHour: rational(itemsPerSecond * 3600),
-      ...(stepPower > 0 ? { power: rational(stepPower) } : {}),
+      ...(Math.abs(stepPower) > 1e-12 ? { power: rational(stepPower) } : {}),
       ...(stepPollution > 0 ? { pollution: rational(stepPollution) } : {}),
       parents: new Map(),
       children: [],
@@ -248,7 +257,7 @@ export async function solveAdvanced(input: AdvancedPlannerInput): Promise<Planne
 
   const totals: Totals = {
     ...(Object.keys(totalMachines).length > 0 ? { machines: totalMachines } : {}),
-    ...(totalPower.toNumber() > 0 ? { power: totalPower } : {}),
+    ...(Math.abs(totalPower.toNumber()) > 1e-12 ? { power: totalPower } : {}),
     ...(totalPollution.toNumber() > 0 ? { pollution: totalPollution } : {}),
   };
 
@@ -293,7 +302,7 @@ function buildLpFlowData(
         machineCount,
         ...(norm.machineId ? { machineId: norm.machineId } : {}),
         ...(norm.machineName ? { machineName: norm.machineName } : {}),
-        ...(power !== undefined && power > 0 ? { power } : {}),
+        ...(power !== undefined && Math.abs(power) > 1e-12 ? { power } : {}),
         ...(pollution !== undefined && pollution > 0 ? { pollution } : {}),
         inputItems: norm.inputItems
           .map((item) => ({

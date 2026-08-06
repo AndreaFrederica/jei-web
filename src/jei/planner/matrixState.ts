@@ -8,7 +8,7 @@
 
 import type { ItemKey, Recipe, RecipeTypeDef } from '../types';
 import type { JeiIndex } from '../indexing/buildIndex';
-import { recipesProducingItem } from '../indexing/buildIndex';
+import { recipesConsumingItem, recipesProducingItem } from '../indexing/buildIndex';
 import { itemKeyHash } from '../indexing/key';
 import { normalizeTagId } from '../tags/resolve';
 import type { ObjectiveState, ItemValues } from './types';
@@ -19,6 +19,13 @@ import type { Rational } from './rational';
 import { normalizeRecipe, type NormalizedRecipe } from './recipeAdapter';
 import { convertToPerSecond } from './units';
 import { sortRecipeOptionsForItem } from './planner';
+import {
+  isRecipeEnabledForScenario,
+  resolvePlannerScenario,
+  type PlannerScenarioSettings,
+  type ResolvedPlannerScenario,
+} from './plannerConfig';
+import type { PackPlannerConfig } from '../types';
 
 // ─── Extended state ────────────────────────────────────────────────────────────
 
@@ -48,6 +55,9 @@ export interface MatrixStateWithNorm {
 
   /** Items for which no recipe could be found — must be externally supplied */
   unproduceableIds: Set<string>;
+
+  /** Pack-declared profile, feature, location, and bound settings. */
+  plannerScenario: ResolvedPlannerScenario;
 
   maximizeType: MaximizeType;
 }
@@ -82,6 +92,8 @@ export function buildMatrixState(args: {
   defaultNs: string;
   maximizeType?: MaximizeType;
   preferSingleRecipeChain?: boolean;
+  plannerConfig?: PackPlannerConfig;
+  plannerSettings?: PlannerScenarioSettings;
 }): MatrixStateWithNorm {
   const {
     objectives,
@@ -92,7 +104,10 @@ export function buildMatrixState(args: {
     defaultNs,
     maximizeType = MaximizeType.Ratio,
     preferSingleRecipeChain = true,
+    plannerConfig,
+    plannerSettings,
   } = args;
+  const plannerScenario = resolvePlannerScenario(plannerConfig, plannerSettings);
 
   const recipes = new Map<string, Recipe>();
   const normalizedRecipes = new Map<string, NormalizedRecipe>();
@@ -129,7 +144,10 @@ export function buildMatrixState(args: {
       return;
     }
 
-    const producingIds = recipesProducingItem(index, key);
+    const producingIds = recipesProducingItem(index, key).filter((recipeId) => {
+      const recipe = index.recipesById.get(recipeId);
+      return recipe ? isRecipeEnabledForScenario(recipe, plannerScenario) : false;
+    });
     if (producingIds.length === 0) {
       unproduceableIds.add(h);
       return;
@@ -155,6 +173,7 @@ export function buildMatrixState(args: {
 
     const recipe = index.recipesById.get(recipeId);
     if (!recipe) return;
+    if (!isRecipeEnabledForScenario(recipe, plannerScenario)) return;
 
     recipes.set(recipeId, recipe);
 
@@ -227,6 +246,30 @@ export function buildMatrixState(args: {
     }
   }
 
+  // Include declared sink recipes (for example wastewater disposal) when their
+  // input item is part of the reachable graph. Repeat because a sink may expose
+  // another output whose own sink must also be considered.
+  let includedSink = true;
+  while (includedSink) {
+    includedSink = false;
+    for (const key of Array.from(itemKeyByHash.values())) {
+      for (const recipeId of recipesConsumingItem(index, key)) {
+        if (visitedRecipes.has(recipeId)) continue;
+        const recipe = index.recipesById.get(recipeId);
+        if (!recipe?.flags?.includes('planner-sink')) continue;
+        if (!isRecipeEnabledForScenario(recipe, plannerScenario)) continue;
+        exploreRecipe(recipeId);
+        includedSink = true;
+      }
+    }
+  }
+
+  // A declared external input has a bounded source variable and must not also
+  // receive the solver's high-penalty unlimited unproduceable variable.
+  for (const itemId of plannerScenario.externalInputs.keys()) {
+    unproduceableIds.delete(itemKeyHash({ id: itemId }));
+  }
+
   return {
     objectives,
     recipes,
@@ -236,6 +279,7 @@ export function buildMatrixState(args: {
     itemIds,
     itemKeyByHash,
     unproduceableIds,
+    plannerScenario,
     maximizeType,
   };
 }

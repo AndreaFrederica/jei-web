@@ -144,10 +144,32 @@ export interface RecipeTypeDef {
   i18n?: Record<string, { displayName: string }>;
 }
 
+export interface RecipePlannerEnvironmentRequirement {
+  id: string;
+  amountPerSecondPerMachine: number;
+}
+
+export interface RecipePlannerMetadata {
+  /** Objective cost per active machine equivalent. Replaces the default machine cost. */
+  cost?: number;
+  /** Require whole machine equivalents even when the rest of the model is continuous. */
+  integer?: boolean;
+  /** Optional direct upper bound in machine equivalents. */
+  maxMachines?: number;
+  /** Informational description of environment media represented by recipe inputs. */
+  requiredEnvironments?: RecipePlannerEnvironmentRequirement[];
+}
+
 export interface Recipe {
   id: string;
   type: string;
   slotContents: Record<string, SlotContent>;
+  name?: string;
+  iconSprite?: ItemDef['iconSprite'];
+  category?: string;
+  flags?: string[];
+  locations?: string[];
+  planner?: RecipePlannerMetadata;
   params?: Record<string, unknown>;
   inlineItems?: ItemDef[];
   detailPath?: string;
@@ -206,6 +228,64 @@ export interface PackTags {
   item?: Record<string, TagDef>;
 }
 
+export type PlannerConstraintBasis = 'machine' | 'craft_rate';
+
+export interface PlannerConstraintTerm {
+  recipeId: string;
+  coefficient: number;
+  basis?: PlannerConstraintBasis;
+}
+
+export interface PlannerLinearConstraint {
+  id: string;
+  label?: string;
+  terms: PlannerConstraintTerm[];
+  lowerBound?: number;
+  upperBound?: number;
+}
+
+export interface PlannerLocation {
+  id: string;
+  label: string;
+}
+
+export interface PlannerFeature {
+  id: string;
+  label: string;
+  recipeIds?: string[];
+  externalInputs?: Record<ItemId, number>;
+  defaultEnabled?: boolean;
+}
+
+export interface PlannerProfile {
+  id: string;
+  label: string;
+  locationIds?: string[];
+  constraints?: PlannerLinearConstraint[];
+  machineLimits?: Record<string, number>;
+  externalInputs?: Record<ItemId, number>;
+  enabledFeatureIds?: string[];
+  disabledRecipeIds?: string[];
+}
+
+export interface PackPlannerConfig {
+  targetRatePresets?: {
+    halfPerMinute?: number;
+    fullPerMinute?: number;
+  };
+  locations?: PlannerLocation[];
+  defaultLocationIds?: string[];
+  profiles?: PlannerProfile[];
+  defaultProfileId?: string;
+  features?: PlannerFeature[];
+  constraints?: PlannerLinearConstraint[];
+  costWeights?: {
+    machine?: number;
+    electric?: number;
+    footprint?: number;
+  };
+}
+
 export interface PackManifest {
   packId: string;
   gameId: string;
@@ -245,12 +325,7 @@ export interface PackManifest {
       anonymousTokenResponsePath?: string;
     };
   };
-  planner?: {
-    targetRatePresets?: {
-      halfPerMinute?: number;
-      fullPerMinute?: number;
-    };
-  };
+  planner?: PackPlannerConfig;
 }
 
 export interface PackData {
